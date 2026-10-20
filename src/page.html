@@ -25,6 +25,12 @@
   circle { fill: var(--series); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 16px; font-size: 13px; color: var(--muted); }
   .legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--series); }
+  h2 { font-size: 17px; margin: 32px 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--grid); }
+  th { font-weight: 600; font-size: 13px; color: var(--muted); }
+  td.balance, th.balance { text-align: right; }
+  .stale { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--error-bg); color: var(--error-fg); }
   .error { background: var(--error-bg); color: var(--error-fg); padding: 16px; border-radius: 8px; white-space: pre-wrap; }
 </style>
 </head>
@@ -35,6 +41,7 @@
 </main>
 <script>
 const gbp = (pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
+const dayLabel = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const monthLabel = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 
 function el(tag, attrs = {}, text) {
@@ -88,6 +95,21 @@ function niceStep(raw) {
   return [1, 2, 5, 10].map((m) => m * magnitude).find((s) => s >= raw);
 }
 
+function accountTable(accounts) {
+  const table = el("table");
+  const head = el("tr");
+  for (const [label, className] of [["Account"], ["Kind"], ["Latest Balance", "balance"], ["Dated"]]) head.append(el("th", className ? { class: className } : {}, label));
+  table.append(head);
+  for (const { account, kind, pence, date, stale } of accounts) {
+    const dated = el("td", {}, dayLabel(date));
+    if (stale) dated.append(el("span", { class: "stale", title: "Latest Balance is more than 2 months old. It still counts in Net Worth." }, "Stale"));
+    const row = el("tr");
+    row.append(el("td", {}, account), el("td", {}, kind), el("td", { class: "balance" }, gbp(pence)), dated);
+    table.append(row);
+  }
+  return table;
+}
+
 async function render() {
   const content = document.getElementById("content");
   const report = await fetch("/report").then((r) => r.json());
@@ -102,7 +124,7 @@ async function render() {
     content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
     content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
-  content.append(legend(), chart(report.snapshots));
+  content.append(legend(), chart(report.snapshots), el("h2", {}, "Accounts"), accountTable(report.accounts));
 }
 render();
 </script>

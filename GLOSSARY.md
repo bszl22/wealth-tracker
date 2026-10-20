@@ -85,6 +85,10 @@ _Avoid_: Recurring payment, direct debit (a direct debit is a payment method, no
 The Balance of every Account, and the resulting Net Worth, as of the last day of a month. Each Account uses its latest known Balance on or before that day.
 _Avoid_: Data point, period
 
+**Stale**:
+Said of an Account whose latest Balance is dated more than 2 months before today. A Stale Account still counts in every Month-End Snapshot at that latest Balance.
+_Avoid_: Out of date, expired
+
 **Tracking Start**:
 The first month the tracker shows a Month-End Snapshot for, currently January 2026.
 _Avoid_: Start date, epoch
