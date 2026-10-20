@@ -16,21 +16,33 @@ const READERS: Record<string, StatementReader> = {
   "Vanguard Statements": readVanguardStatement,
 };
 
-/** Reads every Statement PDF in the known Institution folders. Never writes to the data folder. */
-export async function scanStatements(dataFolder: string): Promise<Balance[]> {
-  const balances: Balance[] = [];
+/** One Statement PDF and the Accounts its reader found, or why it could not be read. */
+export type StatementRead = { file: string } & ({ accounts: StatementAccount[] } | { error: string });
+
+/** Reads every Statement PDF in the known Institution folders, one result per file. Never writes to the data folder. */
+export async function readStatements(dataFolder: string): Promise<StatementRead[]> {
+  const reads: StatementRead[] = [];
   for (const [folder, read] of Object.entries(READERS)) {
     const files = (await readdir(join(dataFolder, folder))).filter((f) => f.toLowerCase().endsWith(".pdf")).sort();
     for (const file of files) {
-      let accounts: StatementAccount[];
+      const path = `${folder}/${file}`;
       try {
-        accounts = read(await extractPdfText(join(dataFolder, folder, file)));
+        reads.push({ file: path, accounts: read(await extractPdfText(join(dataFolder, folder, file))) });
       } catch (error) {
-        throw new Error(`Could not read ${folder}/${file}: ${(error as Error).message}`);
+        reads.push({ file: path, error: (error as Error).message });
       }
-      for (const { name, kind, balances: accountBalances } of accounts) {
-        for (const balance of accountBalances) balances.push({ ...balance, account: name, kind });
-      }
+    }
+  }
+  return reads;
+}
+
+/** Every Balance from every Statement, failing on the first Statement that could not be read. */
+export async function scanStatements(dataFolder: string): Promise<Balance[]> {
+  const balances: Balance[] = [];
+  for (const statement of await readStatements(dataFolder)) {
+    if ("error" in statement) throw new Error(`Could not read ${statement.file}: ${statement.error}`);
+    for (const { name, kind, balances: accountBalances } of statement.accounts) {
+      for (const balance of accountBalances) balances.push({ ...balance, account: name, kind });
     }
   }
   return balances;
