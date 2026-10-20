@@ -41,6 +41,43 @@ describe("calculateNetWorth", () => {
     expect(snapshots).toEqual([{ monthEnd: "2026-01-31", netWorth: 30 }]);
   });
 
+  it("gives each month inside a year-long Statement the Running Balance after its last Transaction on or before the month-end", () => {
+    const kroo = (date: string, pence: number, source: Balance["source"] = "Running"): Balance => ({
+      account: "Kroo",
+      kind: "Asset",
+      date,
+      pence,
+      source,
+    });
+    // One Statement covering 6 April 2025 to 5 April 2026, listed Closing Balance first as the reader returns it.
+    const balances = [
+      kroo("2026-04-05", 40000, "Closing"),
+      kroo("2025-04-06", 10000),
+      kroo("2025-12-20", 20000),
+      kroo("2026-01-31", 25000),
+      kroo("2026-01-31", 30000),
+      kroo("2026-03-02", 40000),
+    ];
+    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-04-10" });
+    expect(snapshots).toEqual([
+      { monthEnd: "2026-01-31", netWorth: 30000 },
+      { monthEnd: "2026-02-28", netWorth: 30000 },
+      { monthEnd: "2026-03-31", netWorth: 40000 },
+      { monthEnd: "2026-04-30", netWorth: 40000 },
+    ]);
+  });
+
+  it("counts an Account only from its first Balance onward, adding it to the other Accounts after that", () => {
+    const kroo: Balance = { account: "Kroo", kind: "Asset", date: "2026-02-10", pence: 5000, source: "Running" };
+    const balances = [hsbc("2026-01-05", 100000), kroo];
+    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-03-01" });
+    expect(snapshots).toEqual([
+      { monthEnd: "2026-01-31", netWorth: 100000 },
+      { monthEnd: "2026-02-28", netWorth: 105000 },
+      { monthEnd: "2026-03-31", netWorth: 105000 },
+    ]);
+  });
+
   it("carries a Balance from before Tracking Start into the first Month-End Snapshots", () => {
     const balances = [hsbc("2025-12-29", 50000), hsbc("2026-02-14", 65000)];
     const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-20" });
