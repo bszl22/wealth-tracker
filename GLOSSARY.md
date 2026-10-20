@@ -50,7 +50,7 @@ A single movement of money into or out of an Account, as listed on a Statement.
 _Avoid_: Entry, line item, payment (when meaning any transaction)
 
 **Transfer**:
-A Transaction that moves money between two of your own Accounts, such as paying the Amex bill from HSBC. It counts as neither Spending nor Earnings.
+A Transaction that moves money between your own Accounts, or within one, such as paying the Amex bill from HSBC or moving money to a Kroo pot. A Categorisation Rule marks it as a Transfer, and it counts as neither Spending nor Earnings.
 _Avoid_: Internal payment
 
 **Spending**:
@@ -58,18 +58,18 @@ Transactions that send money out to someone else, counted on the day they are ma
 _Avoid_: Outgoings, expenses
 
 **Refund**:
-Money returned by a merchant for an earlier purchase. It reduces Spending in that purchase's Category and is never Earnings.
+Money coming in that a Categorisation Rule puts in a Spending Category, such as a merchant returning money for an earlier purchase. It reduces Spending in that Category and is never Earnings.
 
 **Earnings**:
-Transactions that bring money in from someone else, such as salary or interest.
+Transactions that bring money in from someone else, such as salary or bank interest. Money going out under an Earnings Category reduces Earnings. Dividends and growth inside an investment Account are not Earnings: they show only in that Account's Balance.
 _Avoid_: Income, inflows
 
 **Category**:
-The top level of a two-level grouping for Spending and Earnings, such as Food. Each Category contains Subcategories, such as Groceries or Eating Out.
+The top level of a two-level grouping, such as Food. Each Category is either a Spending Category or an Earnings Category, and contains Subcategories, such as Groceries or Eating Out.
 _Avoid_: Tag, label
 
 **Categorisation Rule**:
-A rule you write that gives matching Transactions a Category and Subcategory, such as "description contains NETFLIX → Entertainment › Streaming".
+A rule you write that gives matching Transactions a Category and Subcategory, or marks them as Transfers, such as "description contains NETFLIX → Entertainment › Streaming". When several rules match a Transaction, the first in your list wins.
 _Avoid_: Filter, mapping
 
 **Uncategorised**:
@@ -92,3 +92,7 @@ _Avoid_: Out of date, expired
 **Tracking Start**:
 The first month the tracker shows a Month-End Snapshot for, currently January 2026.
 _Avoid_: Start date, epoch
+
+**Other Change**:
+The part of a month's change in Net Worth that Earnings minus Spending doesn't explain, such as investment growth or timing between purchases and Statement dates.
+_Avoid_: Unexplained, residual
