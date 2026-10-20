@@ -10,6 +10,8 @@ export function readAmexStatement(text: string): StatementAccount[] {
       name: "Amex",
       kind: "Liability",
       balances: [{ date: periodEnd(text), pence: closingBalance(text), source: "Closing" }],
+      // Amex Transactions are not read yet.
+      transactions: [],
     },
   ];
 }

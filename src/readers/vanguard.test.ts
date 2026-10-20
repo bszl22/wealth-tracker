@@ -20,17 +20,19 @@ Cash account - - £234.56
 `;
 
 describe("readVanguardStatement", () => {
-  it("returns the Vanguard ISA and the Vanguard General Account as Assets, each with its Closing Balance dated at the end of the period", () => {
+  it("returns the Vanguard ISA and the Vanguard General Account as Assets, each with its Closing Balance dated at the end of the period and no Transactions", () => {
     expect(readVanguardStatement(statement)).toEqual([
       {
         name: "Vanguard ISA",
         kind: "Asset",
         balances: [{ date: "2026-01-05", pence: 123456, source: "Closing" }],
+        transactions: [],
       },
       {
         name: "Vanguard General Account",
         kind: "Asset",
         balances: [{ date: "2026-01-05", pence: 2000001, source: "Closing" }],
+        transactions: [],
       },
     ]);
   });

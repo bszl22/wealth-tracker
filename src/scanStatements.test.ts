@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readStatements, scanStatements } from "./scanStatements.js";
+import { combineStatements, readStatements, scanStatements, type StatementRead } from "./scanStatements.js";
 
 const KNOWN_FOLDERS = ["Amex Statements", "HSBC Statements", "Kroo", "Vanguard Statements"];
 
@@ -79,5 +79,41 @@ describe("readStatements", () => {
     expect(error).toContain("Could not read HSBC Statements/2026-01.pdf");
     expect(error).toContain("Could not read Kroo/notes.txt");
     expect(error).not.toContain(MADE_UP_CONTENTS);
+  });
+});
+
+describe("combineStatements", () => {
+  it("tags every Balance and Transaction with its Account and Statement file", () => {
+    // Made-up reads. Every figure and description is invented.
+    const reads: StatementRead[] = [
+      {
+        file: "HSBC Statements/2026-01.pdf",
+        accounts: [
+          {
+            name: "HSBC",
+            kind: "Asset",
+            balances: [{ date: "2026-01-27", pence: 99000, source: "Closing" }],
+            transactions: [
+              { date: "2026-01-20", description: "VIS CORNER SHOP", pence: 1000, direction: "Out" },
+              { date: "2026-01-25", description: "CR EMPLOYER LTD", pence: 250000, direction: "In" },
+            ],
+          },
+        ],
+      },
+      {
+        file: "Vanguard Statements/2026-01.pdf",
+        accounts: [{ name: "Vanguard ISA", kind: "Asset", balances: [{ date: "2026-01-05", pence: 500000, source: "Closing" }], transactions: [] }],
+      },
+    ];
+    expect(combineStatements(reads)).toEqual({
+      balances: [
+        { statement: "HSBC Statements/2026-01.pdf", account: "HSBC", kind: "Asset", date: "2026-01-27", pence: 99000, source: "Closing" },
+        { statement: "Vanguard Statements/2026-01.pdf", account: "Vanguard ISA", kind: "Asset", date: "2026-01-05", pence: 500000, source: "Closing" },
+      ],
+      transactions: [
+        { statement: "HSBC Statements/2026-01.pdf", account: "HSBC", date: "2026-01-20", description: "VIS CORNER SHOP", pence: 1000, direction: "Out" },
+        { statement: "HSBC Statements/2026-01.pdf", account: "HSBC", date: "2026-01-25", description: "CR EMPLOYER LTD", pence: 250000, direction: "In" },
+      ],
+    });
   });
 });

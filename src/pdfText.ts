@@ -4,8 +4,9 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 type PositionedText = { str: string; x: number; y: number };
 
 /**
- * Extracts a PDF's selectable text as lines, top to bottom, with the items on
- * each line joined left to right by spaces. Scanned (image-only) PDFs are not supported.
+ * Extracts a PDF's selectable text as lines, top to bottom, with the items on each line laid out
+ * left to right at about their printed position, so a table's columns still line up. Readers that
+ * don't need columns collapse the spaces with singleSpaced. Scanned (image-only) PDFs are not supported.
  */
 export async function extractPdfText(path: string): Promise<string> {
   const data = new Uint8Array(await readFile(path));
@@ -30,7 +31,11 @@ export async function extractPdfText(path: string): Promise<string> {
 
 const SAME_LINE_TOLERANCE = 2;
 
+/** Points of page width per character of extracted text. */
+const POINTS_PER_CHARACTER = 4;
+
 function toLines(items: PositionedText[]): string[] {
+  const margin = Math.min(...items.map((item) => item.x));
   const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
   const lines: PositionedText[][] = [];
   for (const item of sorted) {
@@ -41,7 +46,9 @@ function toLines(items: PositionedText[]): string[] {
   return lines.map((line) =>
     line
       .sort((a, b) => a.x - b.x)
-      .map((i) => i.str)
-      .join(" "),
+      .reduce((text, item) => {
+        const column = Math.max(text === "" ? 0 : text.length + 1, Math.round((item.x - margin) / POINTS_PER_CHARACTER));
+        return text.padEnd(column) + item.str;
+      }, ""),
   );
 }

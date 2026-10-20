@@ -29,7 +29,8 @@ export function readVanguardStatement(text: string): StatementAccount[] {
     if (!row) return [];
     const name = ACCOUNTS[row[1]!];
     if (!name) throw new StatementReadError("The account summary lists an unknown product");
-    return [{ name, kind: "Asset", balances: [{ date, pence: closingBalance(row), source: "Closing" }] }];
+    // Vanguard gives no Transactions, so contributions, dividends and fees show only in its Balance.
+    return [{ name, kind: "Asset", balances: [{ date, pence: closingBalance(row), source: "Closing" }], transactions: [] }];
   });
   const accountTotal = SUMMARY_ROW.exec(lines[totalLine]!);
   const sum = accounts.reduce((pence, account) => pence + account.balances[0]!.pence, 0);

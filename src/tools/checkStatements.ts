@@ -6,6 +6,7 @@ import { loadSettings } from "../settings.js";
 import type { Pence } from "../statements.js";
 
 // Prints what each reader found in every Statement, then the Month-End Snapshots, to the terminal only.
+// Transactions are only counted, since their descriptions must never reach the terminal.
 // For checking a reader by hand against the real Statements. An optional argument keeps only the
 // Statements whose path contains it, e.g. "Vanguard".
 
@@ -19,14 +20,14 @@ try {
       console.log(`  Could not read: ${statement.error}`);
       continue;
     }
-    for (const { name, kind, balances } of statement.accounts) {
+    for (const { name, kind, balances, transactions } of statement.accounts) {
       const closing = balances.filter((b) => b.source === "Closing");
       const running = balances.filter((b) => b.source === "Running");
       const closingText = closing.map((b) => `${pounds(b.pence)} on ${b.date}`).join(", ") || "none";
-      console.log(`  ${name} (${kind}): Closing Balance ${closingText}; ${running.length} Running Balances`);
+      console.log(`  ${name} (${kind}): Closing Balance ${closingText}; ${running.length} Running Balances; ${transactions.length} Transactions`);
     }
   }
-  const balances = await scanStatements(settings.dataFolder);
+  const { balances } = await scanStatements(settings.dataFolder);
   const { snapshots } = calculateNetWorth({ balances, trackingStart: settings.trackingStart, today: localToday() });
   console.log("\nMonth-End Snapshots (Net Worth = Assets - Liabilities)");
   for (const { monthEnd, assets, liabilities, netWorth } of snapshots) {

@@ -26,6 +26,7 @@ describe("readAmexStatement", () => {
         name: "Amex",
         kind: "Liability",
         balances: [{ date: "2026-02-05", pence: 229517, source: "Closing" }],
+        transactions: [],
       },
     ]);
   });

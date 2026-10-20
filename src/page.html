@@ -33,6 +33,10 @@
   .stale { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--error-bg); color: var(--error-fg); }
   .error { background: var(--error-bg); color: var(--error-fg); padding: 16px 20px; border-radius: 8px; border-left: 4px solid var(--error-fg); white-space: pre-wrap; margin-top: 16px; }
   .error h2 { margin: 0 0 8px; color: inherit; }
+  .scroll { overflow-x: auto; }
+  table.months th, table.months td { white-space: nowrap; }
+  table.months th:first-child, table.months td:first-child { position: sticky; left: 0; background: var(--bg); }
+  tr.net td { font-weight: 600; border-top: 2px solid var(--grid); }
 </style>
 </head>
 <body>
@@ -111,6 +115,41 @@ function accountTable(accounts) {
   return table;
 }
 
+const monthHeading = (month) => (month.partial ? `${monthLabel(month.monthEnd)} so far` : monthLabel(month.monthEnd));
+
+/** A table with months across the top and one row per figure. */
+function monthTable(heading, months, rows) {
+  const table = el("table", { class: "months" });
+  const head = el("tr");
+  head.append(el("th", {}, heading));
+  for (const month of months) head.append(el("th", { class: "balance" }, monthHeading(month)));
+  table.append(head);
+  for (const { label, pence, className } of rows) {
+    const row = el("tr", className ? { class: className } : {});
+    row.append(el("td", {}, label));
+    for (const month of months) row.append(el("td", { class: "balance" }, gbp(pence(month))));
+    table.append(row);
+  }
+  const scroll = el("div", { class: "scroll" });
+  scroll.append(table);
+  return scroll;
+}
+
+function spendingSection({ months }) {
+  const section = el("div");
+  section.append(
+    el("h2", {}, "Spending"),
+    el("div", { class: "muted" }, "With no Categorisation Rules yet, all Spending (money out) and Earnings (money in) is Uncategorised."),
+    monthTable("Spending", months, [{ label: "Uncategorised", pence: (m) => m.spending.uncategorised }]),
+    el("h2", {}, "Earnings"),
+    monthTable("Earnings", months, [
+      { label: "Uncategorised", pence: (m) => m.earnings.uncategorised },
+      { label: "Net (Earnings − Spending)", pence: (m) => m.net, className: "net" },
+    ]),
+  );
+  return section;
+}
+
 async function render() {
   const content = document.getElementById("content");
   const report = await fetch("/report")
@@ -130,7 +169,7 @@ async function render() {
     content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
     content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
-  content.append(legend(), chart(report.snapshots), el("h2", {}, "Accounts"), accountTable(report.accounts));
+  content.append(legend(), chart(report.snapshots), el("h2", {}, "Accounts"), accountTable(report.accounts), spendingSection(report.spending));
 }
 render();
 </script>

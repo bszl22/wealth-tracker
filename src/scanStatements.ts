@@ -6,16 +6,20 @@ import { readAmexStatement } from "./readers/amex.js";
 import { readHsbcStatement } from "./readers/hsbc.js";
 import { readKrooStatement } from "./readers/kroo.js";
 import { readVanguardStatement } from "./readers/vanguard.js";
-import { StatementReadError, type StatementAccount } from "./statements.js";
+import type { Transaction } from "./spending.js";
+import { singleSpaced, StatementReadError, type StatementAccount } from "./statements.js";
 
 type StatementReader = (text: string) => StatementAccount[];
 
-/** Each Institution folder the tracker can read. Folders not listed here are ignored. */
+/**
+ * Each Institution folder the tracker can read. Folders not listed here are ignored. HSBC reads its table's
+ * columns from the extracted layout; the other readers get the text single spaced.
+ */
 const READERS: Record<string, StatementReader> = {
-  "Amex Statements": readAmexStatement,
+  "Amex Statements": (text) => readAmexStatement(singleSpaced(text)),
   "HSBC Statements": readHsbcStatement,
-  Kroo: readKrooStatement,
-  "Vanguard Statements": readVanguardStatement,
+  Kroo: (text) => readKrooStatement(singleSpaced(text)),
+  "Vanguard Statements": (text) => readVanguardStatement(singleSpaced(text)),
 };
 
 /** One file in a known Institution folder and the Accounts its reader found, or why it could not be read. */
@@ -62,17 +66,23 @@ async function readStatement(path: string, read: StatementReader): Promise<{ acc
   }
 }
 
-/** Every Balance from every Statement, failing with every file that could not be read. */
-export async function scanStatements(dataFolder: string): Promise<Balance[]> {
-  const statements = await readStatements(dataFolder);
+/** Every Balance and Transaction from every Statement, failing with every file that could not be read. */
+export async function scanStatements(dataFolder: string): Promise<{ balances: Balance[]; transactions: Transaction[] }> {
+  return combineStatements(await readStatements(dataFolder));
+}
+
+/** Every Balance and Transaction from the files read, each tagged with its Account and Statement file, failing with every file that could not be read. */
+export function combineStatements(statements: StatementRead[]): { balances: Balance[]; transactions: Transaction[] } {
   const unreadable = statements.flatMap((s) => ("error" in s ? [`Could not read ${s.file}: ${s.error}`] : []));
   if (unreadable.length > 0) throw new Error(unreadable.join("\n"));
   const balances: Balance[] = [];
+  const transactions: Transaction[] = [];
   for (const statement of statements) {
     if ("error" in statement) continue;
-    for (const { name, kind, balances: accountBalances } of statement.accounts) {
+    for (const { name, kind, balances: accountBalances, transactions: accountTransactions } of statement.accounts) {
       for (const balance of accountBalances) balances.push({ ...balance, statement: statement.file, account: name, kind });
+      for (const transaction of accountTransactions) transactions.push({ ...transaction, statement: statement.file, account: name });
     }
   }
-  return balances;
+  return { balances, transactions };
 }

@@ -73,7 +73,8 @@ function sum(balances: Balance[]): Pence {
   return balances.reduce((total, b) => total + b.pence, 0);
 }
 
-function monthEndsFrom(start: YearMonth, today: IsoDate): IsoDate[] {
+/** The last day of each month from Tracking Start through the month holding today. */
+export function monthEndsFrom(start: YearMonth, today: IsoDate): IsoDate[] {
   const [thisYear, thisMonth] = today.split("-").map(Number) as [number, number];
   const monthEnds: IsoDate[] = [];
   let { year, month } = start;

@@ -19,6 +19,8 @@ export function readKrooStatement(text: string): StatementAccount[] {
       kind: "Asset",
       // The Closing Balance comes first so a Running Balance on the same date, listed later, wins.
       balances: [{ date: periodEnd(text), pence: closing, source: "Closing" }, ...running],
+      // Kroo Transactions are not read yet.
+      transactions: [],
     },
   ];
 }

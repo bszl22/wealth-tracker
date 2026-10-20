@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { calculateNetWorth } from "./netWorth.js";
 import { scanStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
+import { calculateSpending } from "./spending.js";
 import type { IsoDate } from "./statements.js";
 
 const PAGE = new URL("./page.html", import.meta.url);
@@ -30,8 +31,13 @@ export function startServer(settings: Settings, port: number): Promise<Server> {
 
 async function report(settings: Settings) {
   try {
-    const balances = await scanStatements(settings.dataFolder);
-    return calculateNetWorth({ balances, trackingStart: settings.trackingStart, today: localToday() });
+    const { balances, transactions } = await scanStatements(settings.dataFolder);
+    const today = localToday();
+    const { trackingStart } = settings;
+    return {
+      ...calculateNetWorth({ balances, trackingStart, today }),
+      spending: calculateSpending({ transactions, trackingStart, today }),
+    };
   } catch (error) {
     return { error: (error as Error).message };
   }
