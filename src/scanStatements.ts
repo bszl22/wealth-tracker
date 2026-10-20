@@ -4,6 +4,7 @@ import type { Balance } from "./netWorth.js";
 import { extractPdfText } from "./pdfText.js";
 import { readHsbcStatement } from "./readers/hsbc.js";
 import { readKrooStatement } from "./readers/kroo.js";
+import { readVanguardStatement } from "./readers/vanguard.js";
 import type { StatementAccount } from "./statements.js";
 
 type StatementReader = (text: string) => StatementAccount[];
@@ -12,6 +13,7 @@ type StatementReader = (text: string) => StatementAccount[];
 const READERS: Record<string, StatementReader> = {
   "HSBC Statements": readHsbcStatement,
   Kroo: readKrooStatement,
+  "Vanguard Statements": readVanguardStatement,
 };
 
 /** Reads every Statement PDF in the known Institution folders. Never writes to the data folder. */

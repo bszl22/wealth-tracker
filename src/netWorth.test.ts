@@ -78,6 +78,31 @@ describe("calculateNetWorth", () => {
     ]);
   });
 
+  it("carries each Account's Closing Balance forward unchanged until its next Statement, including one dated before Tracking Start", () => {
+    const vanguard = (account: string, date: string, pence: number): Balance => ({
+      account,
+      kind: "Asset",
+      date,
+      pence,
+      source: "Closing",
+    });
+    // Quarterly Statements, each giving both Accounts one Closing Balance at the end of its period.
+    const balances = [
+      vanguard("Vanguard ISA", "2025-12-31", 100000),
+      vanguard("Vanguard General Account", "2025-12-31", 50000),
+      vanguard("Vanguard ISA", "2026-03-31", 120000),
+      vanguard("Vanguard General Account", "2026-03-31", 45000),
+    ];
+    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-05-02" });
+    expect(snapshots).toEqual([
+      { monthEnd: "2026-01-31", netWorth: 150000 },
+      { monthEnd: "2026-02-28", netWorth: 150000 },
+      { monthEnd: "2026-03-31", netWorth: 165000 },
+      { monthEnd: "2026-04-30", netWorth: 165000 },
+      { monthEnd: "2026-05-31", netWorth: 165000 },
+    ]);
+  });
+
   it("carries a Balance from before Tracking Start into the first Month-End Snapshots", () => {
     const balances = [hsbc("2025-12-29", 50000), hsbc("2026-02-14", 65000)];
     const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-20" });
