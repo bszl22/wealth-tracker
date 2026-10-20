@@ -10,7 +10,7 @@ Identifiers, comments, test names and error messages use the terms defined in `G
 
 A reader lives in `src/readers/<institution>.ts`, exports one `read<Institution>Statement(text): StatementAccount[]`, and is registered by folder name in `src/scanStatements.ts`. Model a new reader on `hsbc.ts` and `kroo.ts`:
 
-- **Layout**: the exported reader first, then its patterns and constants, then one small helper per thing it reads (`closingBalance`, `periodEnd`, `runningBalances`). Each helper throws its own `StatementReadError("No X found")` when the thing is missing.
+- **Layout**: the exported reader first, then its patterns and constants, then one small helper per thing it reads (`closingBalance`, `periodEnd`, `transactionTable`). Each helper throws its own `StatementReadError("No X found")` when the thing is missing.
 - **Balance order**: list Balances in the order the Statement prints them, with the Closing Balance first. On a shared date the last listed Balance wins, and the check for disagreeing Statements compares each Statement's last listed Balance on a date, so a reader that lists out of order gives a wrong Net Worth or a false conflict.
 - **Cross-checked**: a reader proves it read the whole Statement by checking its figures against each other, such as each Running Balance following from the one before, the last matching the Closing Balance, or summary rows adding up to a printed total. It fails rather than guessing when they disagree.
 - **Error messages** name what was missing or didn't add up in glossary terms, with no figures or descriptions from the Statement.

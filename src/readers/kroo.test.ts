@@ -58,6 +58,19 @@ describe("readKrooStatement", () => {
     ]);
   });
 
+  it("returns every Transaction across the year, in the order listed, with its direction read from the Running Balances", () => {
+    const [account] = readKrooStatement(statement);
+    expect(account?.transactions).toEqual([
+      { date: "2025-04-20", description: "Added to Cash ISA", pence: 50000, direction: "In" },
+      { date: "2025-05-01", description: "Deposit interest", pence: 400, direction: "In" },
+      { date: "2025-06-15", description: "Withdrawn from Cash ISA", pence: 20000, direction: "Out" },
+      { date: "2025-06-15", description: "Withdrawn from Cash ISA", pence: 30000, direction: "Out" },
+      { date: "2025-12-10", description: "Added to Cash ISA", pence: 250000, direction: "In" },
+      { date: "2026-01-01", description: "Deposit interest", pence: 834, direction: "In" },
+      { date: "2026-03-31", description: "Withdrawn from Cash ISA", pence: 100000, direction: "Out" },
+    ]);
+  });
+
   it("fails rather than guessing when the Closing Balance is missing", () => {
     const withoutClosing = statement.replaceAll(/^Closing balance.*$/gm, "");
     expect(() => readKrooStatement(withoutClosing)).toThrow(/Closing Balance/);
@@ -71,6 +84,23 @@ describe("readKrooStatement", () => {
   it("fails rather than guessing when the last Running Balance doesn't match the Closing Balance", () => {
     const missingLastTransaction = statement.replace(/^31 Mar 2026 .*$/m, "");
     expect(() => readKrooStatement(missingLastTransaction)).toThrow(/Running Balances do not add up/);
+  });
+
+  it("fails rather than guessing when a Transaction has no Running Balance before it", () => {
+    const withoutOpening = statement.replace(/^06 Apr 2025 Opening balance.*$/m, "");
+    expect(() => readKrooStatement(withoutOpening)).toThrow(/Transaction appears before the first Balance/);
+  });
+
+  it("fails rather than guessing when a line after the opening balance has a Running Balance but no Transaction", () => {
+    const withoutAmount = statement.replace("Added to Cash ISA £2,500.00 £3,504.00", "Added to Cash ISA £3,504.00");
+    expect(() => readKrooStatement(withoutAmount)).toThrow(/Running Balance has no Transaction beside it/);
+  });
+
+  it("fails rather than guessing when a Transaction's description is missing", () => {
+    const afterHeader = statement.replace("£3,504.00\nDeposit interest\n01 Jan", "£3,504.00\nDate Description Out In Balance\n01 Jan");
+    expect(() => readKrooStatement(afterHeader)).toThrow(/Transaction has no description/);
+    const afterTransaction = statement.replace("£1,500.00\nDeposit interest\n01 May", "£1,500.00\n01 May");
+    expect(() => readKrooStatement(afterTransaction)).toThrow(/Transaction has no description/);
   });
 
   it("fails rather than guessing when no Transaction lines can be found", () => {
