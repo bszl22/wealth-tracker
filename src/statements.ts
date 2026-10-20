@@ -29,7 +29,7 @@ export function isMoney(token: string): boolean {
 
 /** Parses "1,234.56" into pence without going through floating point. */
 export function parsePence(money: string): Pence {
-  if (!isMoney(money)) throw new StatementReadError("An amount could not be read");
+  if (!isMoney(money)) throw new StatementReadError("A Balance or Transaction could not be read");
   const [pounds, pennies] = money.replaceAll(",", "").split(".") as [string, string];
   return Number(pounds) * 100 + Number(pennies);
 }

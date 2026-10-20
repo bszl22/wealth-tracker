@@ -15,7 +15,8 @@ export async function loadSettings(projectRoot: string): Promise<Settings> {
   try {
     raw = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
-    const reason = (error as NodeJS.ErrnoException).code === "ENOENT" ? "is missing" : "is not valid JSON";
+    const code = (error as NodeJS.ErrnoException).code;
+    const reason = code === "ENOENT" ? "is missing" : error instanceof SyntaxError ? "is not valid JSON" : "can't be opened";
     throw new Error(`${SETTINGS_FILE} ${reason}. ${HOW_TO_FIX}`);
   }
   const { dataFolder, trackingStart } = (raw ?? {}) as Record<string, unknown>;

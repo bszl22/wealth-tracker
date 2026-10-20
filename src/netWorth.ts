@@ -1,7 +1,7 @@
 import type { AccountKind, IsoDate, Pence, StatementBalance } from "./statements.js";
 
-/** A Balance from any Statement, tagged with the Account it belongs to. */
-export type Balance = StatementBalance & { account: string; kind: AccountKind };
+/** A Balance from any Statement, tagged with the Account it belongs to and the Statement file it came from. */
+export type Balance = StatementBalance & { statement: string; account: string; kind: AccountKind };
 
 export type YearMonth = { year: number; month: number };
 
@@ -9,7 +9,7 @@ export type YearMonth = { year: number; month: number };
 export type MonthEndSnapshot = { monthEnd: IsoDate; assets: Pence; liabilities: Pence; netWorth: Pence };
 
 /** An Account's latest Balance on or before today, Stale when that Balance is more than 2 months old. */
-export type AccountBalance = Omit<Balance, "source"> & { stale: boolean };
+export type AccountBalance = Omit<Balance, "source" | "statement"> & { stale: boolean };
 
 export type NetWorthInput = {
   /** Every Balance from every Statement, each Statement's Balances in the order it lists them. */
@@ -22,6 +22,7 @@ export function calculateNetWorth({ balances, trackingStart, today }: NetWorthIn
   snapshots: MonthEndSnapshot[];
   accounts: AccountBalance[];
 } {
+  checkStatementsAgree(balances);
   const snapshots = monthEndsFrom(trackingStart, today).map((monthEnd): MonthEndSnapshot => {
     const latest = [...latestBalancesOnOrBefore(balances, monthEnd).values()];
     const assets = sum(latest.filter((b) => b.kind === "Asset"));
@@ -36,6 +37,26 @@ export function calculateNetWorth({ balances, trackingStart, today }: NetWorthIn
 }
 
 const KIND_ORDER: AccountKind[] = ["Asset", "Liability"];
+
+/**
+ * Fails when two Statements give different Balances for the same Account and date. Within one
+ * Statement, several Running Balances can share a date, so each Statement's last listed one counts.
+ */
+function checkStatementsAgree(balances: Balance[]): void {
+  const perStatement = new Map<string, Balance>();
+  for (const balance of balances) perStatement.set(`${balance.statement}\n${balance.account}\n${balance.date}`, balance);
+  const firstListed = new Map<string, Balance>();
+  for (const balance of perStatement.values()) {
+    const key = `${balance.account}\n${balance.date}`;
+    const earlier = firstListed.get(key);
+    if (!earlier) firstListed.set(key, balance);
+    else if (earlier.pence !== balance.pence) {
+      throw new Error(
+        `${earlier.statement} and ${balance.statement} give different Balances for ${balance.account} on ${balance.date}`,
+      );
+    }
+  }
+}
 
 /** Each Account's latest Balance dated on or before the given day; on a shared date, the last listed wins. */
 function latestBalancesOnOrBefore(balances: Balance[], day: IsoDate): Map<string, Balance> {

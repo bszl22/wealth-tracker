@@ -31,7 +31,8 @@
   th { font-weight: 600; font-size: 13px; color: var(--muted); }
   td.balance, th.balance { text-align: right; }
   .stale { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--error-bg); color: var(--error-fg); }
-  .error { background: var(--error-bg); color: var(--error-fg); padding: 16px; border-radius: 8px; white-space: pre-wrap; }
+  .error { background: var(--error-bg); color: var(--error-fg); padding: 16px 20px; border-radius: 8px; border-left: 4px solid var(--error-fg); white-space: pre-wrap; margin-top: 16px; }
+  .error h2 { margin: 0 0 8px; color: inherit; }
 </style>
 </head>
 <body>
@@ -112,11 +113,16 @@ function accountTable(accounts) {
 
 async function render() {
   const content = document.getElementById("content");
-  const report = await fetch("/report").then((r) => r.json());
+  const report = await fetch("/report")
+    .then((r) => r.json())
+    .catch(() => ({ error: "The tracker isn't responding. Is it still running? Start it with npm start, then refresh." }));
   content.replaceChildren();
   content.className = "";
   if (report.error) {
-    content.append(el("div", { class: "error" }, report.error));
+    // Shown in place of the chart, since a Net Worth built from partly read Statements could look right and be wrong.
+    const error = el("div", { class: "error", role: "alert" });
+    error.append(el("h2", {}, "Net Worth can't be shown"), el("div", {}, report.error));
+    content.append(error);
     return;
   }
   const latest = report.snapshots.at(-1);
