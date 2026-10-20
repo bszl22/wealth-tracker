@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Balance } from "./netWorth.js";
 import { extractPdfText } from "./pdfText.js";
@@ -23,7 +23,8 @@ export type StatementRead = { file: string } & ({ accounts: StatementAccount[] }
 
 /**
  * Reads every file in the known Institution folders, one result per file, skipping hidden files such as
- * .DS_Store. Fails when a known folder is missing, since its Accounts would silently drop out of Net Worth.
+ * .DS_Store. Fails when a known folder is missing, since its Accounts would silently drop out of Net Worth,
+ * and reports a subfolder as unreadable rather than reading the Statements filed inside it.
  * Never writes to the data folder.
  */
 export async function readStatements(dataFolder: string): Promise<StatementRead[]> {
@@ -46,6 +47,7 @@ export async function readStatements(dataFolder: string): Promise<StatementRead[
 
 /** The Accounts one file's reader found, or why it could not be read. Only a reader's own messages pass through, since they never quote the Statement. */
 async function readStatement(path: string, read: StatementReader): Promise<{ accounts: StatementAccount[] } | { error: string }> {
+  if ((await stat(path)).isDirectory()) return { error: "Subfolders are not read, so move its Statements up into this folder" };
   if (!path.toLowerCase().endsWith(".pdf")) return { error: "Only PDF Statements can be read, so move it out of this folder" };
   let text: string;
   try {
