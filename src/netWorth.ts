@@ -5,7 +5,8 @@ export type Balance = StatementBalance & { account: string; kind: AccountKind };
 
 export type YearMonth = { year: number; month: number };
 
-export type MonthEndSnapshot = { monthEnd: IsoDate; netWorth: Pence };
+/** A Liability holds the Balance owed as a positive number, so Net Worth is the Assets less the Liabilities. */
+export type MonthEndSnapshot = { monthEnd: IsoDate; assets: Pence; liabilities: Pence; netWorth: Pence };
 
 export type NetWorthInput = {
   /** Every Balance from every Statement, each Statement's Balances in the order it lists them. */
@@ -17,10 +18,12 @@ export type NetWorthInput = {
 export function calculateNetWorth({ balances, trackingStart, today }: NetWorthInput): {
   snapshots: MonthEndSnapshot[];
 } {
-  const snapshots = monthEndsFrom(trackingStart, today).map((monthEnd) => ({
-    monthEnd,
-    netWorth: sum([...latestBalancesOnOrBefore(balances, monthEnd).values()]),
-  }));
+  const snapshots = monthEndsFrom(trackingStart, today).map((monthEnd): MonthEndSnapshot => {
+    const latest = [...latestBalancesOnOrBefore(balances, monthEnd).values()];
+    const assets = sum(latest.filter((b) => b.kind === "Asset"));
+    const liabilities = sum(latest.filter((b) => b.kind === "Liability"));
+    return { monthEnd, assets, liabilities, netWorth: assets - liabilities };
+  });
   return { snapshots };
 }
 

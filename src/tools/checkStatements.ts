@@ -28,8 +28,10 @@ try {
   }
   const balances = await scanStatements(settings.dataFolder);
   const { snapshots } = calculateNetWorth({ balances, trackingStart: settings.trackingStart, today: localToday() });
-  console.log("\nMonth-End Snapshots (Net Worth)");
-  for (const { monthEnd, netWorth } of snapshots) console.log(`  ${monthEnd}  ${pounds(netWorth)}`);
+  console.log("\nMonth-End Snapshots (Net Worth = Assets - Liabilities)");
+  for (const { monthEnd, assets, liabilities, netWorth } of snapshots) {
+    console.log(`  ${monthEnd}  ${pounds(netWorth)} = ${pounds(assets)} - ${pounds(liabilities)}`);
+  }
 } catch (error) {
   console.error((error as Error).message);
   process.exitCode = 1;

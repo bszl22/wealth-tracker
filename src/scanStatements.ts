@@ -2,6 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Balance } from "./netWorth.js";
 import { extractPdfText } from "./pdfText.js";
+import { readAmexStatement } from "./readers/amex.js";
 import { readHsbcStatement } from "./readers/hsbc.js";
 import { readKrooStatement } from "./readers/kroo.js";
 import { readVanguardStatement } from "./readers/vanguard.js";
@@ -11,6 +12,7 @@ type StatementReader = (text: string) => StatementAccount[];
 
 /** Each Institution folder the tracker can read. Folders not listed here are ignored. */
 const READERS: Record<string, StatementReader> = {
+  "Amex Statements": readAmexStatement,
   "HSBC Statements": readHsbcStatement,
   Kroo: readKrooStatement,
   "Vanguard Statements": readVanguardStatement,
