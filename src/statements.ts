@@ -59,3 +59,13 @@ export function toIsoDate(day: string, month: string, year: string): IsoDate {
   const fullYear = year.length === 2 ? `20${year}` : year;
   return `${fullYear}-${String(monthIndex + 1).padStart(2, "0")}-${day.padStart(2, "0")}`;
 }
+
+/** An IsoDate from a year, a month numbered from 1, and a day. */
+export function isoDate(year: number, month: number, day: number): IsoDate {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** How many days a month has, the month numbered from 1. */
+export function daysIn(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}

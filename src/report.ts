@@ -3,7 +3,7 @@ import { loadRules, type Category, type CategorisationRule } from "./rules.js";
 import { scanStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
 import { calculateSpending, type SpendingMonth, type Transaction, type UncategorisedDescription } from "./spending.js";
-import type { IsoDate, Pence } from "./statements.js";
+import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 
 export type YearMonth = { year: number; month: number };
 
@@ -72,8 +72,7 @@ export function monthEndsFrom(start: YearMonth, today: IsoDate): IsoDate[] {
   const monthEnds: IsoDate[] = [];
   let { year, month } = start;
   while (year < thisYear || (year === thisYear && month <= thisMonth)) {
-    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    monthEnds.push(`${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`);
+    monthEnds.push(isoDate(year, month, daysIn(year, month)));
     if (month === 12) {
       year += 1;
       month = 1;
@@ -86,5 +85,5 @@ export function monthEndsFrom(start: YearMonth, today: IsoDate): IsoDate[] {
 
 export function localToday(): IsoDate {
   const now = new Date();
-  return [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
+  return isoDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }

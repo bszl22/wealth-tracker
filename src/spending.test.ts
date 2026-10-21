@@ -4,7 +4,7 @@ import type { Category, CategorisationRule } from "./rules.js";
 import {
   calculateSpending,
   type Breakdown,
-  type CategoryTotal,
+  type CategoryFigure,
   type SpendingInput,
   type SubcategoryChange,
   type Transaction,
@@ -31,7 +31,7 @@ const january = (transactions: Transaction[], categories: Category[], rules: Cat
 const noRules = { categories: [], rules: [] };
 
 /** A Category's figures alone, without the Transactions behind them. */
-const categoryFigures = ({ name, pence, subcategories }: CategoryTotal) => ({
+const categoryFigures = ({ name, pence, subcategories }: CategoryFigure) => ({
   name,
   pence,
   subcategories: subcategories.map(({ name, pence }) => ({ name, pence })),
@@ -200,9 +200,9 @@ describe("calculateSpending", () => {
       today: "2026-02-10",
     });
     const [january, februaryMonth] = months;
-    const foodTotal = january!.spending.categories[0]!;
-    expect(foodTotal.transactions).toEqual([shop, cafe, cafeRefund]);
-    expect(foodTotal.subcategories.map((s) => s.transactions)).toEqual([[shop], [cafe, cafeRefund]]);
+    const foodFigure = january!.spending.categories[0]!;
+    expect(foodFigure.transactions).toEqual([shop, cafe, cafeRefund]);
+    expect(foodFigure.subcategories.map((s) => s.transactions)).toEqual([[shop], [cafe, cafeRefund]]);
     expect(january!.spending.uncategorised.transactions).toEqual([mysteryOut]);
     expect(january!.earnings.categories[0]!.transactions).toEqual([salary]);
     expect(january!.earnings.uncategorised.transactions).toEqual([mysteryIn]);

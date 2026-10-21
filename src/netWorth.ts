@@ -1,4 +1,4 @@
-import type { AccountKind, IsoDate, Pence, StatementBalance } from "./statements.js";
+import { daysIn, isoDate, type AccountKind, type IsoDate, type Pence, type StatementBalance } from "./statements.js";
 
 /** A Balance from any Statement, tagged with the Account it belongs to and the Statement file it came from. */
 export type Balance = StatementBalance & { statement: string; account: string; kind: AccountKind };
@@ -78,12 +78,4 @@ function twoMonthsBefore(today: IsoDate): IsoDate {
   const [thisYear, thisMonth, thisDay] = today.split("-").map(Number) as [number, number, number];
   const [year, month] = thisMonth > 2 ? [thisYear, thisMonth - 2] : [thisYear - 1, thisMonth + 10];
   return isoDate(year, month, Math.min(thisDay, daysIn(year, month)));
-}
-
-function daysIn(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-function isoDate(year: number, month: number, day: number): IsoDate {
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }

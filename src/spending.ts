@@ -8,17 +8,17 @@ export type Transaction = StatementTransaction & { statement: string; account: s
 export type Figure = { pence: Pence; transactions: Transaction[] };
 
 /** One Subcategory's figure for a month. */
-export type SubcategoryTotal = Figure & { name: string };
+export type SubcategoryFigure = Figure & { name: string };
 
 /** One Category's figure for a month, and each of its Subcategories' in the order the rules file lists them. */
-export type CategoryTotal = Figure & { name: string; subcategories: SubcategoryTotal[] };
+export type CategoryFigure = Figure & { name: string; subcategories: SubcategoryFigure[] };
 
 /**
  * A month's Spending or Earnings in total, by Category, and Uncategorised. Every month lists every Category of its kind
  * and every Subcategory, in the order the rules file lists them, at zero where nothing moved, so its lines pair up with
  * any other month's by position.
  */
-export type Breakdown = Figure & { categories: CategoryTotal[]; uncategorised: Figure };
+export type Breakdown = Figure & { categories: CategoryFigure[]; uncategorised: Figure };
 
 /** One month's Spending and Earnings, and its Net: Earnings minus Spending. */
 export type SpendingMonth = {
@@ -159,7 +159,7 @@ function breakdown(kind: CategoryKind, categories: Category[], matched: Matched[
   const signed = ({ transaction }: Matched) => (transaction.direction === adds ? transaction.pence : -transaction.pence);
   const totals = categories
     .filter((category) => category.kind === kind)
-    .map(({ name, subcategories }): CategoryTotal => {
+    .map(({ name, subcategories }): CategoryFigure => {
       const inCategory = matched.filter(({ rule }) => rule && "category" in rule && rule.category === name);
       const bySubcategory = subcategories.map((subcategory) => {
         const inSubcategory = inCategory.filter(({ rule }) => rule && "category" in rule && rule.subcategory === subcategory);
