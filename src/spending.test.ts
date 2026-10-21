@@ -31,14 +31,18 @@ const january = (transactions: Transaction[], categories: Category[], rules: Cat
 const noRules = { categories: [], rules: [] };
 
 /** A Category's figures alone, without the Transactions behind them. */
-const categoryFigures = ({ name, total, subcategories }: CategoryTotal) => ({
+const categoryFigures = ({ name, pence, subcategories }: CategoryTotal) => ({
   name,
-  total,
+  pence,
   subcategories: subcategories.map(({ name, pence }) => ({ name, pence })),
 });
 
 /** A Breakdown's figures alone, without the Transactions behind them. */
-const figures = ({ total, uncategorised, categories }: Breakdown) => ({ total, uncategorised, categories: categories.map(categoryFigures) });
+const figures = ({ pence, uncategorised, categories }: Breakdown) => ({
+  pence,
+  uncategorised: uncategorised.pence,
+  categories: categories.map(categoryFigures),
+});
 
 describe("calculateSpending", () => {
   it("gives each month from Tracking Start through the current month its Uncategorised Spending, Uncategorised Earnings and Net", () => {
@@ -51,7 +55,7 @@ describe("calculateSpending", () => {
     ];
     const { months } = calculateSpending({ transactions, ...noRules, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31"], today: "2026-03-02" });
     expect(
-      months.map(({ monthEnd, spending, earnings, net }) => ({ monthEnd, spending: spending.uncategorised, earnings: earnings.uncategorised, net })),
+      months.map(({ monthEnd, spending, earnings, net }) => ({ monthEnd, spending: spending.uncategorised.pence, earnings: earnings.uncategorised.pence, net })),
     ).toEqual([
       { monthEnd: "2026-01-31", spending: 1051, earnings: 250000, net: 248949 },
       { monthEnd: "2026-02-28", spending: 4500, earnings: 0, net: -4500 },
@@ -81,8 +85,8 @@ describe("calculateSpending", () => {
       { ...coffee(february), account: "Kroo" },
     ];
     const { months } = calculateSpending({ transactions, ...noRules, monthEnds: ["2026-01-31"], today: "2026-01-31" });
-    expect(months[0]?.spending.uncategorised).toBe(320 * 4);
-    expect(months[0]?.earnings.uncategorised).toBe(320);
+    expect(months[0]?.spending.uncategorised.pence).toBe(320 * 4);
+    expect(months[0]?.earnings.uncategorised.pence).toBe(320);
   });
 
   it("gives each Transaction the Category and Subcategory of the first rule whose text its description contains, ignoring case", () => {
@@ -92,10 +96,10 @@ describe("calculateSpending", () => {
     ];
     const month = january([hsbc("2026-01-03", "Out", 1050, "VIS CORNER SHOP"), hsbc("2026-01-04", "Out", 400, "VIS corner cafe")], [food], rules);
     expect(figures(month.spending)).toEqual({
-      total: 1450,
+      pence: 1450,
       uncategorised: 0,
       categories: [
-        { name: "Food", total: 1450, subcategories: [{ name: "Groceries", pence: 1050 }, { name: "Eating Out", pence: 400 }] },
+        { name: "Food", pence: 1450, subcategories: [{ name: "Groceries", pence: 1050 }, { name: "Eating Out", pence: 400 }] },
       ],
     });
   });
@@ -103,31 +107,31 @@ describe("calculateSpending", () => {
   it("counts money in under a Spending Category as a Refund, reducing Spending in that Category, never Earnings", () => {
     const rules: CategorisationRule[] = [{ contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" }];
     const month = january([hsbc("2026-01-03", "Out", 1200, "CORNER CAFE"), hsbc("2026-01-05", "In", 450, "CORNER CAFE")], [food, work], rules);
-    expect(month.spending.total).toBe(750);
+    expect(month.spending.pence).toBe(750);
     expect(categoryFigures(month.spending.categories[0]!)).toEqual({
       name: "Food",
-      total: 750,
+      pence: 750,
       subcategories: [{ name: "Groceries", pence: 0 }, { name: "Eating Out", pence: 750 }],
     });
-    expect(month.earnings.total).toBe(0);
+    expect(month.earnings.pence).toBe(0);
   });
 
   it("counts money in under an Earnings Category as Earnings, and money out under it as reducing Earnings", () => {
     const rules: CategorisationRule[] = [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" }];
     const month = january([hsbc("2026-01-20", "In", 250000, "CR EMPLOYER LTD"), hsbc("2026-01-22", "Out", 1999, "EMPLOYER LTD OVERPAYMENT")], [food, work], rules);
     expect(figures(month.earnings)).toEqual({
-      total: 248001,
+      pence: 248001,
       uncategorised: 0,
-      categories: [{ name: "Work", total: 248001, subcategories: [{ name: "Salary", pence: 248001 }, { name: "Bonus", pence: 0 }] }],
+      categories: [{ name: "Work", pence: 248001, subcategories: [{ name: "Salary", pence: 248001 }, { name: "Bonus", pence: 0 }] }],
     });
-    expect(month.spending.total).toBe(0);
+    expect(month.spending.pence).toBe(0);
     expect(month.net).toBe(248001);
   });
 
   it("counts Transfers as neither Spending nor Earnings, whichever way the money moves", () => {
     const rules: CategorisationRule[] = [{ contains: "card bill", transfer: true }];
     const month = january([hsbc("2026-01-10", "Out", 80000, "CARD BILL PAYMENT"), { ...hsbc("2026-01-12", "In", 80000, "CARD BILL THANK YOU"), account: "Card" }], [food, work], rules);
-    expect([month.spending.total, month.earnings.total, month.net]).toEqual([0, 0, 0]);
+    expect([month.spending.pence, month.earnings.pence, month.net]).toEqual([0, 0, 0]);
   });
 
   it("keeps money out that no rule matches in Uncategorised Spending, and money in in Uncategorised Earnings, beside the Categories", () => {
@@ -138,11 +142,42 @@ describe("calculateSpending", () => {
       hsbc("2026-01-05", "In", 303, "MYSTERY MERCHANT"),
     ];
     const month = january(transactions, [food, work], rules);
-    expect([month.spending.uncategorised, month.spending.total]).toEqual([2002, 3003]);
-    expect([month.earnings.uncategorised, month.earnings.total]).toEqual([303, 303]);
+    expect([month.spending.uncategorised.pence, month.spending.pence]).toEqual([2002, 3003]);
+    expect([month.earnings.uncategorised.pence, month.earnings.pence]).toEqual([303, 303]);
     expect(month.net).toBe(-2700);
   });
-  it("gives the Transactions behind each Category, Subcategory and Uncategorised figure in each month", () => {
+  it("lists every Category of its kind and every Subcategory in every month, in the rules file's order, at zero where nothing moved", () => {
+    const home: Category = { name: "Home", kind: "Spending", subcategories: ["Rent"] };
+    const rules: CategorisationRule[] = [
+      { contains: "CORNER SHOP", category: "Food", subcategory: "Groceries" },
+      { contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" },
+    ];
+    const { months } = calculateSpending({
+      transactions: [hsbc("2026-01-04", "Out", 400, "CORNER CAFE"), hsbc("2026-02-05", "Out", 1000, "CORNER SHOP")],
+      categories: [food, work, home],
+      rules,
+      monthEnds: ["2026-01-31", "2026-02-28"],
+      today: "2026-02-28",
+    });
+    expect(months.map((m) => ({ spending: m.spending.categories.map(categoryFigures), earnings: m.earnings.categories.map(categoryFigures) }))).toEqual([
+      {
+        spending: [
+          { name: "Food", pence: 400, subcategories: [{ name: "Groceries", pence: 0 }, { name: "Eating Out", pence: 400 }] },
+          { name: "Home", pence: 0, subcategories: [{ name: "Rent", pence: 0 }] },
+        ],
+        earnings: [{ name: "Work", pence: 0, subcategories: [{ name: "Salary", pence: 0 }, { name: "Bonus", pence: 0 }] }],
+      },
+      {
+        spending: [
+          { name: "Food", pence: 1000, subcategories: [{ name: "Groceries", pence: 1000 }, { name: "Eating Out", pence: 0 }] },
+          { name: "Home", pence: 0, subcategories: [{ name: "Rent", pence: 0 }] },
+        ],
+        earnings: [{ name: "Work", pence: 0, subcategories: [{ name: "Salary", pence: 0 }, { name: "Bonus", pence: 0 }] }],
+      },
+    ]);
+  });
+
+  it("gives the Transactions behind each Category, Subcategory, Uncategorised and total figure in each month, leaving out Transfers", () => {
     const rules: CategorisationRule[] = [
       { contains: "CORNER SHOP", category: "Food", subcategory: "Groceries" },
       { contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" },
@@ -168,11 +203,14 @@ describe("calculateSpending", () => {
     const foodTotal = january!.spending.categories[0]!;
     expect(foodTotal.transactions).toEqual([shop, cafe, cafeRefund]);
     expect(foodTotal.subcategories.map((s) => s.transactions)).toEqual([[shop], [cafe, cafeRefund]]);
-    expect(january!.spending.uncategorisedTransactions).toEqual([mysteryOut]);
+    expect(january!.spending.uncategorised.transactions).toEqual([mysteryOut]);
     expect(january!.earnings.categories[0]!.transactions).toEqual([salary]);
-    expect(january!.earnings.uncategorisedTransactions).toEqual([mysteryIn]);
+    expect(january!.earnings.uncategorised.transactions).toEqual([mysteryIn]);
+    expect(january!.spending.transactions).toEqual([shop, cafe, cafeRefund, mysteryOut]);
+    expect(january!.earnings.transactions).toEqual([salary, mysteryIn]);
     expect(februaryMonth!.spending.categories[0]!.subcategories[0]!.transactions).toEqual([february]);
   });
+
   it("ranks the Uncategorised descriptions by their total from Tracking Start through today, largest first, money out apart from money in", () => {
     const rules: CategorisationRule[] = [
       { contains: "CORNER SHOP", category: "Food", subcategory: "Groceries" },

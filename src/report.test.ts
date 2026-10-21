@@ -55,8 +55,8 @@ describe("buildReport", () => {
       months.map(({ snapshot, partial, spending, earnings, net }) => ({
         snapshot,
         partial,
-        spending: spending.total,
-        earnings: earnings.total,
+        spending: spending.pence,
+        earnings: earnings.pence,
         net,
       })),
     ).toEqual([

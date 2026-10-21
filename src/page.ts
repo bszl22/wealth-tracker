@@ -1,7 +1,7 @@
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import type { Category, CategoryKind } from "./rules.js";
-import type { Breakdown, Transaction, UncategorisedDescription } from "./spending.js";
+import type { CategoryKind } from "./rules.js";
+import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
@@ -128,14 +128,19 @@ function niceStep(raw: number): number {
   return [1, 2, 5, 10].map((m) => m * magnitude).find((s) => s >= raw)!;
 }
 
-/** Spending per month as one bar stacked by Spending Category, then Uncategorised, on the Net Worth chart's month axis. */
-function spendingChart(months: ReportMonth[], categories: Category[]) {
+/**
+ * Spending per month as one bar stacked by Spending Category, then Uncategorised, on the Net Worth chart's month axis.
+ * Every month lists the same Categories in the same order, so the first month's give the series.
+ */
+function spendingChart(months: ReportMonth[]) {
   type Series = { className: string; label: string; pence: (m: ReportMonth) => Pence };
   const series: Series[] = [
-    ...categories
-      .filter((category) => category.kind === "Spending")
-      .map((category, i): Series => ({ className: `category-${i % 8}`, label: category.name, pence: (m) => m.spending.categories[i]!.total })),
-    { className: "uncategorised", label: "Uncategorised", pence: (m) => m.spending.uncategorised },
+    ...(months[0]?.spending.categories ?? []).map(({ name }, i): Series => ({
+      className: `category-${i % 8}`,
+      label: name,
+      pence: (m) => m.spending.categories[i]!.pence,
+    })),
+    { className: "uncategorised", label: "Uncategorised", pence: (m) => m.spending.uncategorised.pence },
   ];
   // A Category whose Refunds outweigh its Spending in a month stacks below zero.
   const stacks = months.map((month) => {
@@ -233,19 +238,18 @@ function figureButton(text: string, title: string, transactions: Transaction[], 
   return button;
 }
 
-/**
- * A table with months across the top and one row per figure. A row with subrows expands to show them. Clicking a
- * figure from a row with Transactions lists them below the table, `adds` being the direction that adds to the figure.
- */
-/** One row of a month table: its figure and the Transactions behind it in each month, and any subrows. */
+/** One row of a month table: its figure in each month, and any subrows. */
 type FigureRow = {
   label: string;
-  pence: (m: ReportMonth) => Pence;
-  transactions?: (m: ReportMonth) => Transaction[];
+  figure: (m: ReportMonth) => Figure;
   className?: string;
   subrows?: FigureRow[];
 };
 
+/**
+ * A table with months across the top and one row per figure. A row with subrows expands to show them. Clicking a
+ * figure lists its Transactions below the table, `adds` being the direction that adds to the figure.
+ */
 function monthTable(heading: string, months: ReportMonth[], rows: FigureRow[], adds: Direction) {
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table", { class: "months" });
@@ -265,13 +269,14 @@ function monthTable(heading: string, months: ReportMonth[], rows: FigureRow[], a
     columns[i]!.push(th);
   });
   table.append(head);
-  const figureRow = ({ label, pence, transactions, className }: FigureRow, labelCell?: HTMLElement) => {
+  const figureRow = ({ label, figure, className }: FigureRow, labelCell?: HTMLElement) => {
     const row = el("tr", className ? { class: className } : {});
     row.append(labelCell ?? el("td", {}, label));
     months.forEach((month, i) => {
       const cell = el("td", { class: "balance" });
-      const text = gbp(pence(month));
-      cell.append(transactions ? figureButton(text, `${label}, ${monthHeading(month)}: ${text}`, transactions(month), adds, panel) : text);
+      const { pence, transactions } = figure(month);
+      const text = gbp(pence);
+      cell.append(figureButton(text, `${label}, ${monthHeading(month)}: ${text}`, transactions, adds, panel));
       cell.addEventListener("click", () => monthSelection.select(month.monthEnd));
       row.append(cell);
       columns[i]!.push(cell);
@@ -428,32 +433,20 @@ function netWorthChangePanel(months: ReportMonth[]) {
   });
 }
 
-/** Every Transaction behind a month's Spending or Earnings. */
-const breakdownTransactions = (breakdown: Breakdown): Transaction[] => [...breakdown.categories.flatMap((c) => c.transactions), ...breakdown.uncategorisedTransactions];
-
-/** One row per Category of the kind, expandable into its Subcategories, then Uncategorised and the total. */
-function breakdownRows(categories: Category[], kind: CategoryKind, figures: (m: ReportMonth) => Breakdown): FigureRow[] {
-  const rows = categories
-    .filter((category) => category.kind === kind)
-    .map((category, i): FigureRow => ({
-      label: category.name,
-      pence: (m) => figures(m).categories[i]!.total,
-      transactions: (m) => figures(m).categories[i]!.transactions,
-      subrows: category.subcategories.map((name, j) => ({
-        label: name,
-        pence: (m) => figures(m).categories[i]!.subcategories[j]!.pence,
-        transactions: (m) => figures(m).categories[i]!.subcategories[j]!.transactions,
-      })),
-    }));
+/**
+ * One row per Category, expandable into its Subcategories, then Uncategorised and the total. Every month lists the same
+ * Categories and Subcategories in the same order, so the first month's give the rows.
+ */
+function breakdownRows(months: ReportMonth[], kind: CategoryKind, breakdown: (m: ReportMonth) => Breakdown): FigureRow[] {
+  const rows = (months[0] ? breakdown(months[0]).categories : []).map(({ name, subcategories }, i): FigureRow => ({
+    label: name,
+    figure: (m) => breakdown(m).categories[i]!,
+    subrows: subcategories.map(({ name }, j) => ({ label: name, figure: (m) => breakdown(m).categories[i]!.subcategories[j]! })),
+  }));
   return [
     ...rows,
-    { label: "Uncategorised", pence: (m) => figures(m).uncategorised, transactions: (m) => figures(m).uncategorisedTransactions },
-    {
-      label: `Total ${kind}`,
-      pence: (m) => figures(m).total,
-      transactions: (m) => breakdownTransactions(figures(m)),
-      className: "total",
-    },
+    { label: "Uncategorised", figure: (m) => breakdown(m).uncategorised },
+    { label: `Total ${kind}`, figure: breakdown, className: "total" },
   ];
 }
 
@@ -492,20 +485,19 @@ function uncategorisedList(uncategorised: UncategorisedDescription[]) {
   return section;
 }
 
-function spendingSection({ months, uncategorised, categories, rulesFile }: Report) {
+function spendingSection({ months, uncategorised, rulesFile }: Report) {
   const section = el("div");
   section.append(
     el("h2", {}, "Spending"),
     rulesFileNote(rulesFile),
-    monthTable("Spending", months, breakdownRows(categories, "Spending", (m) => m.spending), "Out"),
+    monthTable("Spending", months, breakdownRows(months, "Spending", (m) => m.spending), "Out"),
     el("h2", {}, "Earnings"),
     monthTable("Earnings", months, [
-      ...breakdownRows(categories, "Earnings", (m) => m.earnings),
+      ...breakdownRows(months, "Earnings", (m) => m.earnings),
       // Money in adds to Net and money out takes from it, under Spending and Earnings alike.
       {
         label: "Net (Earnings − Spending)",
-        pence: (m) => m.net,
-        transactions: (m) => [...breakdownTransactions(m.earnings), ...breakdownTransactions(m.spending)],
+        figure: (m) => ({ pence: m.net, transactions: [...m.earnings.transactions, ...m.spending.transactions] }),
         className: "net",
       },
     ], "In"),
@@ -528,7 +520,7 @@ async function render() {
     content.append(error);
     return;
   }
-  const { months, categories } = report;
+  const { months } = report;
   const latest = months.at(-1)?.snapshot;
   if (latest) {
     content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
@@ -539,7 +531,7 @@ async function render() {
   content.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(months),
-    spendingChart(months, categories),
+    spendingChart(months),
     netWorthChangePanel(months),
     whatChangedPanel(months),
     el("h2", {}, "Accounts"),

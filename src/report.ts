@@ -35,7 +35,6 @@ export type Report = {
   months: ReportMonth[];
   accounts: AccountBalance[];
   uncategorised: UncategorisedDescription[];
-  categories: Category[];
   rulesFile: ReportInput["rulesFile"];
 };
 
@@ -59,7 +58,7 @@ export function buildReport({ balances, transactions, categories, rules, rulesFi
     const before = snapshots[i - 1];
     return { ...month, snapshot, netWorthChange: before && netWorthChange(before, snapshot, month.net) };
   });
-  return { months, accounts, uncategorised: spending.uncategorised, categories, rulesFile };
+  return { months, accounts, uncategorised: spending.uncategorised, rulesFile };
 }
 
 function netWorthChange(before: MonthEndSnapshot, after: MonthEndSnapshot, net: Pence): NetWorthChange {

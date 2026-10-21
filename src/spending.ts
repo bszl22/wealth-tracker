@@ -4,16 +4,21 @@ import type { Direction, IsoDate, Pence, StatementTransaction } from "./statemen
 /** A Transaction from any Statement, tagged with the Account it belongs to and the Statement file it came from. */
 export type Transaction = StatementTransaction & { statement: string; account: string };
 
-/** One Category's figure for a month, and each of its Subcategories' in the order the rules file lists them, each with the Transactions behind it. */
-export type CategoryTotal = {
-  name: string;
-  total: Pence;
-  transactions: Transaction[];
-  subcategories: { name: string; pence: Pence; transactions: Transaction[] }[];
-};
+/** A figure for a month and the Transactions behind it. */
+export type Figure = { pence: Pence; transactions: Transaction[] };
 
-/** A month's Spending or Earnings: by Category, Uncategorised with the Transactions behind it, and in total. */
-export type Breakdown = { total: Pence; uncategorised: Pence; uncategorisedTransactions: Transaction[]; categories: CategoryTotal[] };
+/** One Subcategory's figure for a month. */
+export type SubcategoryTotal = Figure & { name: string };
+
+/** One Category's figure for a month, and each of its Subcategories' in the order the rules file lists them. */
+export type CategoryTotal = Figure & { name: string; subcategories: SubcategoryTotal[] };
+
+/**
+ * A month's Spending or Earnings in total, by Category, and Uncategorised. Every month lists every Category of its kind
+ * and every Subcategory, in the order the rules file lists them, at zero where nothing moved, so its lines pair up with
+ * any other month's by position.
+ */
+export type Breakdown = Figure & { categories: CategoryTotal[]; uncategorised: Figure };
 
 /** One month's Spending and Earnings, and its Net: Earnings minus Spending. */
 export type SpendingMonth = {
@@ -82,7 +87,7 @@ export function calculateSpending({ transactions, categories, rules, monthEnds, 
     const spending = breakdown("Spending", categories, inMonth);
     const earnings = breakdown("Earnings", categories, inMonth);
     const partial = monthEnd.slice(0, 7) === today.slice(0, 7);
-    return { monthEnd, partial, spending, earnings, net: earnings.total - spending.total };
+    return { monthEnd, partial, spending, earnings, net: earnings.pence - spending.pence };
   });
   return {
     months: months.map((month, i): SpendingMonth => ({
@@ -106,7 +111,7 @@ function whatChanged(month: MonthFigures, earlier: MonthFigures[]): WhatChanged 
       ...breakdownOf(m).categories.flatMap(({ name, subcategories }) =>
         subcategories.map(({ name: subcategory, pence, transactions }) => ({ category: name, subcategory, pence, transactions })),
       ),
-      { category: undefined, subcategory: "Uncategorised", pence: breakdownOf(m).uncategorised, transactions: breakdownOf(m).uncategorisedTransactions },
+      { category: undefined, subcategory: "Uncategorised", ...breakdownOf(m).uncategorised },
     ];
     const earlierLines = earlier.map(subcategoryLines);
     return subcategoryLines(month).map((line, position): SubcategoryChange => {
@@ -116,8 +121,7 @@ function whatChanged(month: MonthFigures, earlier: MonthFigures[]): WhatChanged 
   });
   // A stable sort, so equal changes keep the order the rules file lists them.
   changes.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-  const spent = [...month.spending.categories.flatMap((c) => c.transactions), ...month.spending.uncategorisedTransactions];
-  const largest = spent
+  const largest = month.spending.transactions
     .filter(({ direction }) => direction === "Out")
     .sort((a, b) => b.pence - a.pence)
     .slice(0, LARGEST_TRANSACTIONS);
@@ -161,16 +165,16 @@ function breakdown(kind: CategoryKind, categories: Category[], matched: Matched[
         const inSubcategory = inCategory.filter(({ rule }) => rule && "category" in rule && rule.subcategory === subcategory);
         return { name: subcategory, pence: sum(inSubcategory, signed), transactions: transactionsOf(inSubcategory) };
       });
-      const total = bySubcategory.reduce((total, s) => total + s.pence, 0);
-      return { name, total, transactions: transactionsOf(inCategory), subcategories: bySubcategory };
+      const pence = bySubcategory.reduce((total, s) => total + s.pence, 0);
+      return { name, pence, transactions: transactionsOf(inCategory), subcategories: bySubcategory };
     });
   const unmatched = matched.filter(({ transaction, rule }) => !rule && transaction.direction === adds);
-  const uncategorised = sum(unmatched, signed);
+  const uncategorised = { pence: sum(unmatched, signed), transactions: transactionsOf(unmatched) };
   return {
-    total: totals.reduce((total, c) => total + c.total, uncategorised),
-    uncategorised,
-    uncategorisedTransactions: transactionsOf(unmatched),
+    pence: totals.reduce((total, c) => total + c.pence, uncategorised.pence),
+    transactions: [...totals.flatMap((c) => c.transactions), ...uncategorised.transactions],
     categories: totals,
+    uncategorised,
   };
 }
 
