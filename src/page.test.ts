@@ -123,7 +123,7 @@ describe("making a rule from an Uncategorised row", () => {
     const offered = [...choice(form).options].filter((option) => !option.disabled).map((option) => option.textContent);
     expect(offered).toEqual([
       "Home › Rent", "Home › Energy", "Food › Groceries", "Food › Eating Out", "Fun › Streaming", "Fun › Holidays",
-      "Work › Salary", "Savings › Interest", "Transfer",
+      "Work › Salary", "Savings › Interest", "Transfer", "New Subcategory…", "New Category…",
     ]);
   });
 
@@ -139,10 +139,10 @@ describe("making a rule from an Uncategorised row", () => {
     expect(preview()).toBe("Catches no Uncategorised descriptions.");
   });
 
-  it("asks for a Subcategory or Transfer before saving", async () => {
+  it("asks for a Subcategory, Transfer, or a new Category or Subcategory before saving", async () => {
     const form = makeRule("MYSTERY MERCHANT LTD");
     form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
-    await vi.waitFor(() => expect(form.querySelector(".error")!.textContent).toBe("Choose a Subcategory or Transfer."));
+    await vi.waitFor(() => expect(form.querySelector(".error")!.textContent).toBe("Choose a Subcategory, Transfer, or a new Category or Subcategory."));
   });
 
   it("saves the rule, then fetches the Report again so the caught Transactions move into their Category", async () => {
@@ -154,6 +154,60 @@ describe("making a rule from an Uncategorised row", () => {
     await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
     const [spending] = document.querySelectorAll("table.months");
     expect(rows(spending!).find(([label]) => label === "Uncategorised")!.slice(1, 7)).toEqual(["£0.00", "£0.00", "£0.00", "£9.00", "£0.00", "£0.00"]);
+  });
+
+  const choose = (form: HTMLFormElement, label: string) => {
+    const select = choice(form);
+    select.value = [...select.options].find((option) => option.textContent === label)!.value;
+    select.dispatchEvent(new Event("change"));
+  };
+  const field = <E extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) => form.querySelector<E>(`[name="${name}"]`)!;
+  const save = (form: HTMLFormElement) => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  const offered = (description: string) => [...choice(makeRule(description)).options].map((option) => option.textContent);
+
+  it("starts a new Category's kind as Spending for money out and Earnings for money in, and lets it be changed", () => {
+    const out = makeRule("CITY PARKING 20417");
+    choose(out, "New Category…");
+    expect(field(out, "kind").value).toBe("Spending");
+    const into = makeRule("PAYMENT FROM A FRIEND");
+    choose(into, "New Category…");
+    const kind = field<HTMLSelectElement>(into, "kind");
+    expect(kind.value).toBe("Earnings");
+    expect([...kind.options].map((option) => option.value)).toEqual(["Spending", "Earnings"]);
+  });
+
+  it("saves a new Category with one Subcategory along with the rule", async () => {
+    const form = makeRule("CITY PARKING 20417");
+    type(contains(form), "CITY PARKING");
+    choose(form, "New Category…");
+    type(field(form, "category"), "Transport");
+    type(field(form, "subcategory"), "Parking");
+    save(form);
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND"]));
+    expect(offered("PAYMENT FROM A FRIEND")).toContain("Transport › Parking");
+  });
+
+  it("saves a new Subcategory of an existing Category along with the rule", async () => {
+    const form = makeRule("PAYMENT FROM A FRIEND");
+    choose(form, "New Subcategory…");
+    field<HTMLSelectElement>(form, "parent").value = "Work";
+    type(field(form, "subcategory"), "Gifts");
+    save(form);
+    await vi.waitFor(() => expect(document.querySelector(".uncategorised-list .make-rule")).toBeNull());
+  });
+
+  it("refuses a new Category named the same as an existing one, saying why", async () => {
+    await showPage();
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "New Category…");
+    type(field(form, "category"), "Food");
+    type(field(form, "subcategory"), "Snacks");
+    save(form);
+    await vi.waitFor(() =>
+      expect(form.querySelector(".error")!.textContent).toBe(
+        'There is already a Category named "Food", so the rule wasn\'t saved. Choose it from the list, or give the new Category another name.',
+      ),
+    );
   });
 });
 

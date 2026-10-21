@@ -1,7 +1,7 @@
 import { previewRule } from "./matching.js";
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
+import type { Category, CategoryKind, RuleToSave } from "./rules.js";
 import type { SaveResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
@@ -462,9 +462,9 @@ function rulesFileNote({ path, found }: Report["rulesFile"]) {
   if (found) return el("div", { class: "muted" }, "Sorted into Categories by your Categorisation Rules. Money in under a Spending Category is a Refund, reducing it. Transfers count as neither Spending nor Earnings.");
   const note = el("div", { class: "muted" });
   note.append(
-    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, create ",
+    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, make a rule from an Uncategorised description below with a new Category, which creates ",
     el("code", {}, path),
-    ' listing your Categories and Categorisation Rules, such as { "categories": [{ "name": "Food", "kind": "Spending", "subcategories": ["Groceries"] }], "rules": [{ "contains": "TESCO", "category": "Food", "subcategory": "Groceries" }, { "contains": "AMERICAN EXPRESS", "transfer": true }] }.',
+    ', or create it yourself listing your Categories and Categorisation Rules, such as { "categories": [{ "name": "Food", "kind": "Spending", "subcategories": ["Groceries"] }], "rules": [{ "contains": "TESCO", "category": "Food", "subcategory": "Groceries" }, { "contains": "AMERICAN EXPRESS", "transfer": true }] }.',
   );
   return note;
 }
@@ -492,7 +492,7 @@ function uncategorisedList(report: Report) {
     total.append(figureButton(gbp(pence), `${description}, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
     const make = el("button", { class: "make-rule", type: "button" }, "Make rule");
     make.addEventListener("click", () => {
-      rulePanel.replaceChildren(ruleForm(description, uncategorised, categories, () => rulePanel.replaceChildren()));
+      rulePanel.replaceChildren(ruleForm(description, direction, uncategorised, categories, () => rulePanel.replaceChildren()));
       contains(rulePanel).focus();
     });
     const action = el("td", { class: "balance" });
@@ -544,22 +544,51 @@ function suggestRules({ uncategorised, apiKeySet }: Report) {
 const contains = (node: HTMLElement) => node.querySelector<HTMLInputElement>('input[name="contains"]')!;
 
 /**
- * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory or
- * Transfer. While the text is edited it shows what the rule would catch. Saving adds the rule to the end of the rules
- * file, then shows the Report again.
+ * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
+ * Transfer, a new Subcategory of an existing Category, or a new Category with one Subcategory. A new Category's kind
+ * starts as Spending for money out (`direction`) and Earnings for money in. While the text is edited it shows what the
+ * rule would catch. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report
+ * again.
  */
-function ruleForm(description: string, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
-  type Then = { label: string; rule: (contains: string) => CategorisationRule };
+function ruleForm(description: string, direction: Direction, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
+  type Then = { label: string; adds?: "Category" | "Subcategory"; rule: (contains: string) => RuleToSave };
+  const parent = el("select", { name: "parent" });
+  categories.forEach(({ name }) => parent.append(el("option", { value: name }, name)));
+  const newCategory = el("input", { name: "category", type: "text", autocomplete: "off" });
+  const kind = el("select", { name: "kind" });
+  (["Spending", "Earnings"] satisfies CategoryKind[]).forEach((k) => kind.append(el("option", { value: k }, k)));
+  kind.value = direction === "Out" ? "Spending" : "Earnings";
+  const newSubcategory = el("input", { name: "subcategory", type: "text", autocomplete: "off" });
+  const subcategoryName = () => newSubcategory.value.trim();
   const choices: Then[] = [
     ...categories.flatMap(({ name, subcategories }) =>
       subcategories.map((subcategory): Then => ({ label: `${name} › ${subcategory}`, rule: (contains) => ({ contains, category: name, subcategory }) })),
     ),
     { label: "Transfer", rule: (contains) => ({ contains, transfer: true }) },
+    ...(categories.length > 0
+      ? [
+          {
+            label: "New Subcategory…",
+            adds: "Subcategory" as const,
+            rule: (contains: string): RuleToSave => ({ contains, category: parent.value, subcategory: subcategoryName(), adds: { new: "Subcategory" } }),
+          },
+        ]
+      : []),
+    {
+      label: "New Category…",
+      adds: "Category",
+      rule: (contains) => ({
+        contains,
+        category: newCategory.value.trim(),
+        subcategory: subcategoryName(),
+        adds: { new: "Category", kind: kind.value as CategoryKind },
+      }),
+    },
   ];
   const form = el("form", { class: "rule" });
   const text = el("input", { name: "contains", type: "text", value: description, autocomplete: "off" });
   const then = el("select", { name: "then" });
-  then.append(el("option", { value: "", disabled: "", selected: "" }, "Choose a Subcategory or Transfer"));
+  then.append(el("option", { value: "", disabled: "", selected: "" }, "Choose where to sort it"));
   choices.forEach(({ label }, i) => then.append(el("option", { value: i }, label)));
   const preview = el("div", { class: "preview muted", "aria-live": "polite" });
   const showPreview = () => {
@@ -573,6 +602,22 @@ function ruleForm(description: string, uncategorised: Report["uncategorised"], c
   };
   text.addEventListener("input", showPreview);
   showPreview();
+  const label = (text: string, field: HTMLElement) => {
+    const node = el("label", {}, text);
+    node.append(field);
+    return node;
+  };
+  const parentLabel = label("Category", parent);
+  const newCategoryLabels = [label("New Category", newCategory), label("Kind", kind)];
+  const newSubcategoryLabel = label("New Subcategory", newSubcategory);
+  const adding = () => choices[Number(then.value)]?.adds;
+  const showNewFields = () => {
+    parentLabel.hidden = adding() !== "Subcategory";
+    newCategoryLabels.forEach((node) => (node.hidden = adding() !== "Category"));
+    newSubcategoryLabel.hidden = adding() === undefined;
+  };
+  then.addEventListener("change", showNewFields);
+  showNewFields();
   const error = el("div", { class: "error", role: "alert", hidden: "" });
   const fail = (message: string) => {
     error.textContent = message;
@@ -584,8 +629,10 @@ function ruleForm(description: string, uncategorised: Report["uncategorised"], c
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const chosen = choices[Number(then.value)];
-    if (then.value === "" || !chosen) return fail("Choose a Subcategory or Transfer.");
+    if (then.value === "" || !chosen) return fail("Choose a Subcategory, Transfer, or a new Category or Subcategory.");
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
+    if (adding() === "Category" && newCategory.value.trim() === "") return fail("Give the new Category a name.");
+    if (adding() && subcategoryName() === "") return fail("Give the new Subcategory a name.");
     save.disabled = true;
     const response: SaveResponse = await fetch("/rules", {
       method: "POST",
@@ -600,17 +647,15 @@ function ruleForm(description: string, uncategorised: Report["uncategorised"], c
     }
     await render();
   });
-  const label = (text: string, field: HTMLElement) => {
-    const node = el("label", {}, text);
-    node.append(field);
-    return node;
-  };
   const buttons = el("div", { class: "buttons" });
   buttons.append(save, cancel);
   form.append(
     el("h3", {}, "Make a rule"),
     label("Description contains", text),
     label("Sort into", then),
+    parentLabel,
+    ...newCategoryLabels,
+    newSubcategoryLabel,
     preview,
     el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
     error,

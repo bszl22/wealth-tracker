@@ -151,6 +151,9 @@ describe("withRule", () => {
       { contains: "corner shop", category: "Food", subcategory: "Salary" },
       { contains: " ", transfer: true },
       "corner shop",
+      { contains: "PET SHOP", category: "Pets", subcategory: "Food", adds: { new: "Category", kind: "Pets" } },
+      { contains: "DELI", category: "Food", subcategory: "Deli", adds: { new: "Tag" } },
+      { contains: "DELI", category: "Food", subcategory: "Deli", adds: "Subcategory" },
     ]) {
       expect(() => withRule(contents, rule)).toThrow(
         'The rule wasn\'t saved. It needs "contains" text, and a Category and Subcategory from rules.json or Transfer.',
@@ -162,5 +165,73 @@ describe("withRule", () => {
     const contents = rulesFile({ categories: [food], rules: [] });
     const saved = withRule(contents, { contains: "CARD BILL", transfer: true, category: "Food", note: "extra" });
     expect(JSON.parse(saved).rules).toEqual([{ contains: "CARD BILL", transfer: true }]);
+  });
+
+  it("adds a new Subcategory to the end of an existing Category's Subcategories, saved with the rule", () => {
+    const contents = rulesFile({ categories: [food, work], rules: [] });
+    const saved = withRule(contents, { contains: "SNACK BAR", category: "Food", subcategory: "Snacks", adds: { new: "Subcategory" } });
+    expect(readRules(saved)).toEqual({
+      categories: [{ ...food, subcategories: ["Groceries", "Eating Out", "Snacks"] }, work],
+      rules: [{ contains: "SNACK BAR", category: "Food", subcategory: "Snacks" }],
+    });
+  });
+
+  it("adds a new Category of the given kind with the rule's Subcategory after the existing Categories, saved with the rule", () => {
+    const contents = rulesFile({ categories: [food, work], rules: [] });
+    const saved = withRule(contents, { contains: "PET SHOP", category: "Pets", subcategory: "Food", adds: { new: "Category", kind: "Spending" } });
+    expect(readRules(saved)).toEqual({
+      categories: [food, work, { name: "Pets", kind: "Spending", subcategories: ["Food"] }],
+      rules: [{ contains: "PET SHOP", category: "Pets", subcategory: "Food" }],
+    });
+  });
+
+  it("refuses a new Category or Subcategory named the same as an existing one", () => {
+    const contents = rulesFile({ categories: [food, work], rules: [] });
+    expect(() => withRule(contents, { contains: "PAYROLL", category: "Work", subcategory: "Bonus", adds: { new: "Category", kind: "Earnings" } })).toThrow(
+      'There is already a Category named "Work", so the rule wasn\'t saved. Choose it from the list, or give the new Category another name.',
+    );
+    expect(() => withRule(contents, { contains: "DELI", category: "Food", subcategory: "Groceries", adds: { new: "Subcategory" } })).toThrow(
+      'Food already has a Subcategory named "Groceries", so the rule wasn\'t saved. Choose it from the list, or give the new Subcategory another name.',
+    );
+  });
+
+  it("counts a new name as the same as an existing one whatever its case and surrounding spaces", () => {
+    const contents = rulesFile({ categories: [food, work], rules: [] });
+    expect(() => withRule(contents, { contains: "PAYROLL", category: " work ", subcategory: "Bonus", adds: { new: "Category", kind: "Earnings" } })).toThrow(
+      'There is already a Category named "work"',
+    );
+    expect(() => withRule(contents, { contains: "DELI", category: "Food", subcategory: "groceries ", adds: { new: "Subcategory" } })).toThrow(
+      'Food already has a Subcategory named "groceries"',
+    );
+  });
+
+  it("saves a new name without its surrounding spaces", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    const saved = withRule(contents, { contains: "PET SHOP", category: " Pets ", subcategory: " Food", adds: { new: "Category", kind: "Spending" } });
+    expect(readRules(saved)).toEqual({
+      categories: [food, { name: "Pets", kind: "Spending", subcategories: ["Food"] }],
+      rules: [{ contains: "PET SHOP", category: "Pets", subcategory: "Food" }],
+    });
+  });
+
+  it("refuses a new Category or Subcategory with no name, or a new Subcategory of an unknown Category", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    expect(() => withRule(contents, { contains: "PET SHOP", category: " ", subcategory: "Food", adds: { new: "Category", kind: "Spending" } })).toThrow(
+      "The new Category needs a name, so the rule wasn't saved.",
+    );
+    expect(() => withRule(contents, { contains: "DELI", category: "Food", subcategory: "", adds: { new: "Subcategory" } })).toThrow(
+      "The new Subcategory needs a name, so the rule wasn't saved.",
+    );
+    expect(() => withRule(contents, { contains: "DELI", category: "Fod", subcategory: "Deli", adds: { new: "Subcategory" } })).toThrow(
+      'The rule wasn\'t saved. It needs "contains" text, and a Category and Subcategory from rules.json or Transfer.',
+    );
+  });
+
+  it("creates a rules file holding the new Category and the rule when there is none", () => {
+    const saved = withRule(undefined, { contains: "MARKET STALL", category: "Side Work", subcategory: "Sales", adds: { new: "Category", kind: "Earnings" } });
+    expect(readRules(saved)).toEqual({
+      categories: [{ name: "Side Work", kind: "Earnings", subcategories: ["Sales"] }],
+      rules: [{ contains: "MARKET STALL", category: "Side Work", subcategory: "Sales" }],
+    });
   });
 });

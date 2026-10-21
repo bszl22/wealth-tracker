@@ -111,8 +111,16 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
 }
 
 /**
- * A rules file's contents with `rule` added to the end of its rules, as 2-space JSON, leaving its Categories and earlier
- * rules unchanged and in order. Fails, quoting nothing from the file, when the file or the rule doesn't read cleanly.
+ * A Categorisation Rule to save, and what it `adds` to the rules file's Categories, if anything: a new Category of the
+ * given kind holding just the rule's Subcategory, or the rule's Subcategory as a new one of its existing Category.
+ */
+export type RuleToSave = CategorisationRule & { adds?: { new: "Category"; kind: CategoryKind } | { new: "Subcategory" } };
+
+/**
+ * A rules file's contents with `rule` (a `RuleToSave`) added to the end of its rules, and any new Category added after
+ * the others or new Subcategory added to the end of its Category's, as 2-space JSON, leaving everything else unchanged
+ * and in order. Fails, quoting nothing from the file, when the file or the rule doesn't read cleanly, and refuses a new
+ * Category or Subcategory named the same as an existing one.
  */
 export function withRule(contents: string | undefined, rule: unknown): string {
   try {
@@ -121,14 +129,41 @@ export function withRule(contents: string | undefined, rule: unknown): string {
     // The reader's message quotes the file, so only says that it failed.
     throw new Error(`${RULES_FILE} doesn't read cleanly, so the rule wasn't saved. Fix ${RULES_FILE}, then reload the page to see the problem.`);
   }
-  const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { rules: unknown[] });
-  const { contains, category, subcategory, transfer } = (rule ?? {}) as Record<string, unknown>;
+  const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { categories: Category[]; rules: unknown[] });
+  const { contains, transfer, adds, ...named } = (rule ?? {}) as Record<string, unknown>;
+  // A new name is saved without its surrounding spaces, and the rule names it the same way.
+  const trimmed = (name: unknown) => (adds !== undefined && typeof name === "string" ? name.trim() : name);
+  const [category, subcategory] = [trimmed(named.category), trimmed(named.subcategory)];
   const added = transfer === true ? { contains, transfer } : { contains, category, subcategory };
-  const updated = JSON.stringify({ ...file, rules: [...file.rules, added] }, null, 2) + "\n";
+  const categories = transfer === true || adds === undefined ? file.categories : withAddition(file.categories, category, subcategory, adds);
+  const updated = JSON.stringify({ ...file, categories, rules: [...file.rules, added] }, null, 2) + "\n";
   try {
     readRules(updated);
   } catch {
     throw new Error(`The rule wasn't saved. It needs "contains" text, and a Category and Subcategory from ${RULES_FILE} or Transfer.`);
   }
   return updated;
+}
+
+/**
+ * The rules file's Categories with the rule's new Category, holding just its Subcategory, added after them, or its new
+ * Subcategory added to the end of its Category's Subcategories. Refuses a new name the same as an existing one,
+ * ignoring case.
+ */
+function withAddition(categories: Category[], category: unknown, subcategory: unknown, adds: unknown): Category[] {
+  const { new: adding, kind } = (adds ?? {}) as Record<string, unknown>;
+  // Adding nothing leaves the rule naming what isn't in the file, so the check after saving refuses it.
+  if (adding !== "Category" && adding !== "Subcategory") return categories;
+  const name = adding === "Category" ? category : subcategory;
+  if (name === "") throw new Error(`The new ${adding} needs a name, so the rule wasn't saved.`);
+  const same = (existing: string) => typeof name === "string" && existing.toLowerCase() === name.toLowerCase();
+  const refuse = (existing: string) =>
+    new Error(`${existing} named "${name}", so the rule wasn't saved. Choose it from the list, or give the new ${adding} another name.`);
+  if (adding === "Category") {
+    if (categories.some((c) => same(c.name))) throw refuse("There is already a Category");
+    return [...categories, { name: category, kind, subcategories: [subcategory] } as Category];
+  }
+  const existing = categories.find((c) => c.name === category);
+  if (existing?.subcategories.some(same)) throw refuse(`${existing.name} already has a Subcategory`);
+  return categories.map((c) => (c.name === category ? { ...c, subcategories: [...c.subcategories, subcategory as string] } : c));
 }
