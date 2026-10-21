@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/main.ts",
+    "made-up": "tsx src/tools/madeUpReport.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "statement-text": "tsx src/tools/statementText.ts",

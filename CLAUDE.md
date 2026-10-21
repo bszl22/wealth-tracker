@@ -4,6 +4,8 @@ Bank and brokerage statements are sensitive and live outside this repo in `~/Wea
 
 To read real Statements, which a new reader's layout and every hand check need, use `npm run statement-text -- "<folder>/<file>.pdf"` (the extracted text a reader parses) and `npm run check-statements -- [filter]` (each reader's Closing Balances, then the Month-End Snapshots). Both print to the terminal only.
 
+To see a page change working, run `npm run made-up`: it serves the page at port 4400 with an invented report from `src/tools/madeUpReport.ts`, so screenshots never show real figures.
+
 ## Agent skills
 
 ### Issue tracker
