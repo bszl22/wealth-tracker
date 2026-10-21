@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review for Wealth Tracker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { border-style: dashed !important; }
+  .leak { color: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #e2e8f0; }
+  .label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .mermaid { display: flex; justify-content: center; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-3">
+  <h1 class="font-serif text-4xl">Wealth Tracker: deepening opportunities</h1>
+  <p class="text-sm text-slate-500">21 Oct 2026 · scoped to the hot spots of the last 10 commits: <span class="font-mono">page.ts</span>, <span class="font-mono">spending.ts</span>, <span class="font-mono">server.ts</span></p>
+  <div class="flex flex-wrap gap-5 text-xs text-slate-600 pt-2">
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border border-slate-500 bg-white"></span>module</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-dashed border-slate-500"></span>seam</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-red-600"></span>leakage</span>
+    <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep rounded-sm"></span>deep module</span>
+  </div>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- 1 -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-3">1 · One month axis: a Report module that owns the months</h2>
+    <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-semibold">Strong</span>
+    <span class="rounded-full bg-slate-100 text-slate-600 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-600 space-y-0.5">
+    <li>src/server.ts — buildReport, statementsReport, localToday</li>
+    <li>src/spending.ts — calculateSpending (takes snapshots), netWorthChange</li>
+    <li>src/netWorth.ts — calculateNetWorth, monthEndsFrom</li>
+    <li>src/page.ts — chart(snapshots, months), render()</li>
+    <li>src/tools/madeUpReport.ts, src/tools/checkStatements.ts</li>
+  </ul>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-2">Before: two parallel month lists, joined by index on the page</div>
+      <pre class="mermaid">
+flowchart TB
+  S[server.ts<br/>buildReport] --> N[netWorth<br/>monthEndsFrom]
+  S --> P[spending<br/>monthEndsFrom again]
+  N -- snapshots --> P
+  N -- "snapshots[i]" --> G[page.ts charts]
+  P -- "months[i]" --> G
+  linkStyle 3,4 stroke:#dc2626,stroke-width:2px
+  classDef leak stroke:#dc2626,stroke-width:2px
+  class G leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-2">After: one module, one list of months</div>
+      <div class="flex flex-col items-center gap-3 pt-3">
+        <div class="w-60 text-center border border-slate-400 rounded px-3 py-1 text-sm">server.ts · page.ts · tools</div>
+        <div class="h-5 border-l-2 border-slate-400"></div>
+        <div class="w-72 border-t-2 border-dashed border-slate-500 text-center label text-slate-500 pt-1">buildReport(input) → Report</div>
+        <div class="deep w-72 rounded-lg p-4 space-y-2">
+          <div class="label text-slate-300">Report module</div>
+          <div class="text-xs opacity-60 border border-slate-600 rounded px-2 py-1">month axis, from Tracking Start to today</div>
+          <div class="text-xs opacity-60 border border-slate-600 rounded px-2 py-1">calculateNetWorth</div>
+          <div class="text-xs opacity-60 border border-slate-600 rounded px-2 py-1">calculateSpending</div>
+          <div class="text-xs opacity-60 border border-slate-600 rounded px-2 py-1">Change in Net Worth (Other Change)</div>
+        </div>
+        <div class="text-xs text-slate-500">each month: Snapshot + Spending + Earnings + Net + changes</div>
+      </div>
+    </div>
+  </div>
+
+  <p><b>Problem.</b> The Report is two month lists, <span class="font-mono">snapshots</span> and <span class="font-mono">spending.months</span>, each built by its own call to <span class="font-mono">monthEndsFrom</span>; the page pairs them by index (its comment: “Both calculators give the same months”), and the Net Worth breakdown sits in the Spending module only because that's where the months were.</p>
+  <p><b>Solution.</b> Move <span class="font-mono">buildReport</span> out of the HTTP module into its own Report module that builds the month axis once and hands back one list of months, each carrying its Month-End Snapshot, Spending, Earnings and Change in Net Worth; the Spending module stops taking Snapshots.</p>
+  <ul class="list-disc pl-6 text-sm space-y-1">
+    <li>Locality: month alignment lives in one module</li>
+    <li>Interface shrinks: Spending loses <span class="font-mono">snapshots</span></li>
+    <li>Leverage: page, server, made-up report share it</li>
+    <li>Tests hit <span class="font-mono">buildReport</span>, currently untested</li>
+    <li>Page stops trusting an unwritten invariant</li>
+  </ul>
+</article>
+
+<!-- 2 -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-3">2 · Let a Breakdown name its own lines</h2>
+    <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-0.5 text-xs font-semibold">Strong</span>
+    <span class="rounded-full bg-slate-100 text-slate-600 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-600 space-y-0.5">
+    <li>src/spending.ts — Breakdown, CategoryTotal, whatChanged (subcategoryLines)</li>
+    <li>src/page.ts — breakdownRows, spendingChart, breakdownTransactions</li>
+  </ul>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">Before: three places re-join Categories by position</div>
+      <div class="space-y-2 text-sm">
+        <div class="border border-slate-300 rounded p-2 bg-white">
+          <div class="label text-slate-500">rules file · Category list</div>
+          <div class="font-mono text-xs">categories.filter(kind)[i].subcategories[j]</div>
+        </div>
+        <div class="text-center leak text-xs">↓ index i, j assumed to match ↓</div>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="border-2 border-red-500 rounded p-2 text-xs"><div class="label">page</div>breakdownRows<br/><span class="font-mono">categories[i]!</span></div>
+          <div class="border-2 border-red-500 rounded p-2 text-xs"><div class="label">page</div>spendingChart<br/><span class="font-mono">categories[i]!</span></div>
+          <div class="border-2 border-red-500 rounded p-2 text-xs"><div class="label">spending</div>whatChanged<br/><span class="font-mono">lines[position]!</span></div>
+        </div>
+        <div class="text-xs text-slate-500">…and “every Transaction behind a Breakdown” is assembled twice: <span class="font-mono">breakdownTransactions</span> on the page, <span class="font-mono">spent</span> in whatChanged.</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">After: the Breakdown carries its lines, named</div>
+      <div class="deep rounded-lg p-4 space-y-2 text-sm">
+        <div class="label text-slate-300">Breakdown (Spending or Earnings, one month)</div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="border border-slate-600 rounded px-2 py-1">Food › Groceries · pence · Transactions</div>
+          <div class="border border-slate-600 rounded px-2 py-1">Food › Eating Out · …</div>
+          <div class="border border-slate-600 rounded px-2 py-1">Uncategorised · …</div>
+          <div class="border border-slate-600 rounded px-2 py-1">Total · all Transactions</div>
+        </div>
+      </div>
+      <div class="border-t-2 border-dashed border-slate-500 my-3"></div>
+      <div class="grid grid-cols-3 gap-2 text-xs">
+        <div class="border border-slate-400 rounded p-2">month table reads lines</div>
+        <div class="border border-slate-400 rounded p-2">bar chart reads lines</div>
+        <div class="border border-slate-400 rounded p-2">What changed matches lines by name</div>
+      </div>
+    </div>
+  </div>
+
+  <p><b>Problem.</b> A Breakdown's Categories and Subcategories only make sense paired by position with the rules file's Category list, so the page and “What changed” each rebuild that pairing with non-null-asserted indexes, and a reorder or a kind filter applied differently gives the wrong figure under a label with no error.</p>
+  <p><b>Solution.</b> Have the Spending module hand out each Breakdown's lines already named (Category, Subcategory, Uncategorised, total) with their Transactions, so callers iterate lines instead of indexing into two lists.</p>
+  <ul class="list-disc pl-6 text-sm space-y-1">
+    <li>Locality: line order decided once</li>
+    <li>Page drops <span class="font-mono">!</span> index lookups</li>
+    <li>Delete duplicate “all Transactions” helpers</li>
+    <li>Tests assert lines, not index pairs</li>
+  </ul>
+</article>
+
+<!-- 3 -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-3">3 · Reconcile overlapping Statements in one module</h2>
+    <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-0.5 text-xs font-semibold">Worth exploring</span>
+    <span class="rounded-full bg-slate-100 text-slate-600 px-3 py-0.5 text-xs">in-process · local-substitutable (fs)</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-600 space-y-0.5">
+    <li>src/scanStatements.ts — readStatements, scanStatements, combineStatements</li>
+    <li>src/netWorth.ts — checkStatementsAgree</li>
+    <li>src/spending.ts — withoutOverlaps</li>
+    <li>src/tools/checkStatements.ts — reads every PDF twice</li>
+  </ul>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">Before: cross-section of where “overlap” is handled</div>
+      <div class="space-y-1.5 text-sm">
+        <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center justify-between"><span>scanStatements</span><span class="text-xs text-slate-500">tags only</span></div>
+        <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center justify-between"><span>netWorth</span><span class="text-xs leak">Balances agree across Statements?</span></div>
+        <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center justify-between"><span>spending</span><span class="text-xs leak">Transactions listed twice?</span></div>
+        <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center justify-between"><span>checkStatements tool</span><span class="text-xs text-slate-500">readStatements + scanStatements</span></div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">After: one thick band</div>
+      <div class="space-y-1.5 text-sm">
+        <div class="deep h-28 rounded px-3 py-2 flex flex-col justify-center">
+          <span>Statements module</span>
+          <span class="text-xs opacity-70">reads, tags, checks Balances agree, counts each Transaction once</span>
+          <span class="text-xs opacity-70">→ every read + reconciled Balances and Transactions</span>
+        </div>
+        <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">netWorth: Balances in, Snapshots out</div>
+        <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">spending: Transactions in, Breakdowns out</div>
+      </div>
+    </div>
+  </div>
+
+  <p><b>Problem.</b> Knowing that Statements overlap is split between the Net Worth module (disagreeing Balances fail) and the Spending module (duplicate Transactions are dropped), so each calculator's interface quietly requires raw, unreconciled input and each test file sets up overlap cases its own way.</p>
+  <p><b>Solution.</b> Deepen the Statements scan so it returns Balances already checked to agree and Transactions already counted once, alongside the per-file reads the check tool needs, so a single pass serves the page and the tool.</p>
+  <ul class="list-disc pl-6 text-sm space-y-1">
+    <li>Locality: all overlap rules together</li>
+    <li>Calculators' interfaces get simpler input</li>
+    <li>Check tool reads each PDF once</li>
+    <li>Overlap tests move to one file</li>
+  </ul>
+  <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm">Fits ADR 0001: still a full reread every run, no cache.</div>
+</article>
+
+<!-- 4 -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <div class="flex flex-wrap items-center gap-2">
+    <h2 class="font-serif text-2xl mr-3">4 · Each reader owns the text shape it reads</h2>
+    <span class="rounded-full bg-slate-200 text-slate-700 px-3 py-0.5 text-xs font-semibold">Speculative</span>
+    <span class="rounded-full bg-slate-100 text-slate-600 px-3 py-0.5 text-xs">in-process</span>
+  </div>
+  <ul class="font-mono text-sm text-slate-600 space-y-0.5">
+    <li>src/scanStatements.ts — READERS</li>
+    <li>src/readers/amex.ts, kroo.ts, vanguard.ts, hsbc.ts and their tests</li>
+  </ul>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">Before: mass of interface vs implementation</div>
+      <div class="flex items-end gap-6 h-44 justify-center">
+        <div class="flex flex-col items-center gap-1">
+          <div class="w-20 h-16 border-2 border-red-500 bg-red-50 text-[10px] p-1 text-center">text must already be single spaced (decided in another file)</div>
+          <div class="w-20 h-24 border border-slate-400 bg-slate-100 text-[10px] p-1 text-center">Kroo reader</div>
+        </div>
+        <div class="flex flex-col items-center gap-1">
+          <div class="w-20 h-8 border border-slate-400 bg-white text-[10px] p-1 text-center">raw text</div>
+          <div class="w-20 h-32 border border-slate-400 bg-slate-100 text-[10px] p-1 text-center">HSBC reader (calls singleSpaced itself)</div>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <div class="label text-slate-500 mb-3">After: every reader takes extracted text</div>
+      <div class="flex items-end gap-6 h-44 justify-center">
+        <div class="flex flex-col items-center gap-1">
+          <div class="w-20 h-6 border border-slate-400 bg-white text-[10px] text-center">raw text</div>
+          <div class="deep w-20 h-32 rounded text-[10px] p-1 text-center">Kroo reader</div>
+        </div>
+        <div class="flex flex-col items-center gap-1">
+          <div class="w-20 h-6 border border-slate-400 bg-white text-[10px] text-center">raw text</div>
+          <div class="deep w-20 h-32 rounded text-[10px] p-1 text-center">HSBC reader</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p><b>Problem.</b> Whether a reader wants single-spaced text is decided in the folder registry, not the reader, so three readers' real input contract lives in <span class="font-mono">scanStatements.ts</span> and their tests feed a shape the production path produces elsewhere.</p>
+  <p><b>Solution.</b> Every reader takes text as <span class="font-mono">extractPdfText</span> gives it and single-spaces it itself; the registry becomes a plain folder → reader map.</p>
+  <ul class="list-disc pl-6 text-sm space-y-1">
+    <li>Interface is uniform across readers</li>
+    <li>Tests use the real extracted layout</li>
+    <li>Registry stops knowing reader internals</li>
+  </ul>
+</article>
+
+</section>
+
+<section id="top-recommendation" class="rounded-xl border-2 border-emerald-600 bg-white p-8 space-y-3">
+  <div class="label text-emerald-700">Top recommendation</div>
+  <h2 class="font-serif text-3xl"><a href="#c1" class="underline decoration-emerald-500">1 · One month axis: a Report module that owns the months</a></h2>
+  <p>The page and Spending modules are where nearly every recent commit lands, and they share an unwritten “same months, same order” invariant across three modules; one Report module makes that invariant its implementation, gives the untested <span class="font-mono">buildReport</span> a test surface, and sets up candidate 2 on the Category axis.</p>
+</section>
+
+</main>
+</body>
+</html>

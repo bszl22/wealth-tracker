@@ -1,21 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Balance } from "./netWorth.js";
 import { buildReport, type ReportInput } from "./report.js";
 import type { Category, CategorisationRule } from "./rules.js";
-import type { Transaction } from "./spending.js";
+import { reconcileStatements } from "./scanStatements.js";
+import type { StatementBalance, StatementTransaction } from "./statements.js";
 
 // Made-up Balances and Transactions. Every description and figure is invented.
-const balance = (date: string, pence: number): Balance => ({
-  statement: "HSBC Statements/2026.pdf",
-  account: "HSBC",
-  kind: "Asset",
-  date,
-  pence,
-  source: "Running",
-});
-const transaction = (date: string, direction: Transaction["direction"], pence: number, description: string): Transaction => ({
-  statement: "HSBC Statements/2026.pdf",
-  account: "HSBC",
+const balance = (date: string, pence: number): StatementBalance => ({ date, pence, source: "Running" });
+const transaction = (date: string, direction: StatementTransaction["direction"], pence: number, description: string): StatementTransaction => ({
   date,
   description,
   pence,
@@ -30,13 +21,15 @@ const rules: CategorisationRule[] = [
   { contains: "CARD BILL", transfer: true },
 ];
 
-const report = (input: Pick<ReportInput, "balances" | "transactions" | "today">) =>
+/** The Report from one HSBC Statement holding these Balances and Transactions. */
+const report = ({ balances, transactions, today }: { balances: StatementBalance[]; transactions: StatementTransaction[] } & Pick<ReportInput, "today">) =>
   buildReport({
+    statements: reconcileStatements([{ file: "HSBC Statements/2026.pdf", accounts: [{ name: "HSBC", kind: "Asset", balances, transactions }] }]),
     categories: [food, work],
     rules,
     rulesFile: { path: "rules.json", found: true },
     trackingStart: { year: 2026, month: 1 },
-    ...input,
+    today,
   });
 
 describe("buildReport", () => {

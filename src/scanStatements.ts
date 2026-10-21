@@ -22,6 +22,14 @@ const READERS: Record<string, StatementReader> = {
   "Vanguard Statements": (text) => readVanguardStatement(singleSpaced(text)),
 };
 
+declare const RECONCILED: unique symbol;
+
+/**
+ * Every Balance and Transaction from the Statements, as only `reconcileStatements` gives them: one Balance per Account
+ * and date, and each Transaction counted once where Statements overlap.
+ */
+export type ReconciledStatements = { balances: Balance[]; transactions: Transaction[]; readonly [RECONCILED]: true };
+
 /** One file in a known Institution folder and the Accounts its reader found, or why it could not be read. */
 export type StatementRead = { file: string } & ({ accounts: StatementAccount[] } | { error: string });
 
@@ -67,7 +75,7 @@ async function readStatement(path: string, read: StatementReader): Promise<{ acc
 }
 
 /** Every Balance and Transaction from every Statement, reconciled where Statements overlap, failing with every file that could not be read. */
-export async function scanStatements(dataFolder: string): Promise<{ balances: Balance[]; transactions: Transaction[] }> {
+export async function scanStatements(dataFolder: string): Promise<ReconciledStatements> {
   return reconcileStatements(await readStatements(dataFolder));
 }
 
@@ -76,7 +84,7 @@ export async function scanStatements(dataFolder: string): Promise<{ balances: Ba
  * file that could not be read. It gives one Balance per Account and date, failing when overlapping Statements disagree,
  * and counts each Transaction once where Statements overlap.
  */
-export function reconcileStatements(statements: StatementRead[]): { balances: Balance[]; transactions: Transaction[] } {
+export function reconcileStatements(statements: StatementRead[]): ReconciledStatements {
   const unreadable = statements.flatMap((s) => ("error" in s ? [`Could not read ${s.file}: ${s.error}`] : []));
   if (unreadable.length > 0) throw new Error(unreadable.join("\n"));
   const balances: Balance[] = [];
@@ -88,7 +96,7 @@ export function reconcileStatements(statements: StatementRead[]): { balances: Ba
       for (const transaction of accountTransactions) transactions.push({ ...transaction, statement: statement.file, account: name });
     }
   }
-  return { balances: agreedBalances(balances), transactions: withoutOverlaps(transactions) };
+  return { balances: agreedBalances(balances), transactions: withoutOverlaps(transactions) } as ReconciledStatements;
 }
 
 /**

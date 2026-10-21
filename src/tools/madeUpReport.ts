@@ -1,8 +1,9 @@
 import type { Balance } from "../netWorth.js";
 import type { Category, CategorisationRule } from "../rules.js";
 import { buildReport, type Report } from "../report.js";
+import { reconcileStatements, type StatementRead } from "../scanStatements.js";
 import type { Transaction } from "../spending.js";
-import type { AccountKind, Direction, IsoDate, Pence } from "../statements.js";
+import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from "../statements.js";
 
 // A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
@@ -111,9 +112,23 @@ const balances: Balance[] = [
   closing("Old Easy Access", "2026-03-31", 120000),
 ];
 
+/** The made-up Statement files, each with its Accounts as a reader would give them. */
+function madeUpReads(): StatementRead[] {
+  const files = new Map<string, Map<string, StatementAccount>>();
+  const accountIn = (file: string, name: string, kind: AccountKind): StatementAccount => {
+    const accounts = files.get(file) ?? new Map<string, StatementAccount>();
+    files.set(file, accounts);
+    const account = accounts.get(name) ?? { name, kind, balances: [], transactions: [] };
+    accounts.set(name, account);
+    return account;
+  };
+  for (const { statement, account, kind, ...balance } of balances) accountIn(statement, account, kind).balances.push(balance);
+  for (const { statement, account, kind, ...transaction } of transactions) accountIn(statement, account, kind).transactions.push(transaction);
+  return [...files].map(([file, accounts]) => ({ file, accounts: [...accounts.values()] }));
+}
+
 export const madeUpReport: Report = buildReport({
-  balances,
-  transactions,
+  statements: reconcileStatements(madeUpReads()),
   categories,
   rules,
   rulesFile: { path: "Made-up Statements/rules.json", found: true },

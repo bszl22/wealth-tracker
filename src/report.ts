@@ -1,15 +1,14 @@
-import { calculateNetWorth, type AccountBalance, type Balance, type MonthEndSnapshot } from "./netWorth.js";
+import { calculateNetWorth, type AccountBalance, type MonthEndSnapshot } from "./netWorth.js";
 import { loadRules, type Category, type CategorisationRule } from "./rules.js";
-import { scanStatements } from "./scanStatements.js";
+import { scanStatements, type ReconciledStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
-import { calculateSpending, type SpendingMonth, type Transaction, type UncategorisedDescription } from "./spending.js";
+import { calculateSpending, type SpendingMonth, type UncategorisedDescription } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 
 export type YearMonth = { year: number; month: number };
 
 export type ReportInput = {
-  balances: Balance[];
-  transactions: Transaction[];
+  statements: ReconciledStatements;
   categories: Category[];
   rules: CategorisationRule[];
   /** Where the rules file is, and whether it was found. */
@@ -43,12 +42,12 @@ export type ReportResponse = Report | { error: string };
 
 /** The Report from the Statements and rules file in the data folder, as of today. */
 export async function statementsReport(settings: Settings): Promise<Report> {
-  const { balances, transactions } = await scanStatements(settings.dataFolder);
+  const statements = await scanStatements(settings.dataFolder);
   const { categories, rules, path, found } = await loadRules(settings.dataFolder);
-  return buildReport({ balances, transactions, categories, rules, rulesFile: { path, found }, trackingStart: settings.trackingStart, today: localToday() });
+  return buildReport({ statements, categories, rules, rulesFile: { path, found }, trackingStart: settings.trackingStart, today: localToday() });
 }
 
-export function buildReport({ balances, transactions, categories, rules, rulesFile, trackingStart, today }: ReportInput): Report {
+export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today }: ReportInput): Report {
   const monthEnds = monthEndsFrom(trackingStart, today);
   const { snapshots, accounts } = calculateNetWorth({ balances, monthEnds, today });
   const spending = calculateSpending({ transactions, categories, rules, monthEnds, today });
