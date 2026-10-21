@@ -1,6 +1,8 @@
+import { previewRule } from "./matching.js";
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import type { CategoryKind } from "./rules.js";
+import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
+import type { SaveResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 
@@ -52,6 +54,10 @@ const monthSelection = {
   select(monthEnd: IsoDate | undefined) {
     this.selected = monthEnd;
     for (const show of this.shows) show(monthEnd);
+  },
+  /** Forgets what showed the selection, keeping the selected month, before the page is shown again. */
+  forgetShows() {
+    this.shows = [];
   },
 };
 
@@ -461,31 +467,121 @@ function rulesFileNote({ path, found }: Report["rulesFile"]) {
   return note;
 }
 
-/** Uncategorised descriptions, largest total first, each listing its Transactions when clicked. */
-function uncategorisedList(uncategorised: UncategorisedDescription[]) {
-  const section = el("div");
+/**
+ * Uncategorised descriptions, largest total first, each listing its Transactions when clicked, and each with a form to
+ * make a Categorisation Rule from it.
+ */
+function uncategorisedList({ uncategorised, categories }: Report) {
+  const section = el("div", { class: "uncategorised-list" });
   section.append(el("h2", {}, "Uncategorised"));
   if (uncategorised.length === 0) {
     section.append(el("div", { class: "muted" }, "Every Transaction is sorted into a Category or marked as a Transfer."));
     return section;
   }
-  section.append(el("div", { class: "muted" }, "Descriptions no Categorisation Rule matches, largest total first, so the next rule to write is at the top. Click a total to see its Transactions."));
+  section.append(el("div", { class: "muted" }, "Descriptions no Categorisation Rule matches, largest total first, so the next rule to write is at the top. Click a total to see its Transactions, or make a rule from a description."));
   const panel = el("div", { class: "transactions-panel" });
+  const rulePanel = el("div");
   const table = el("table");
-  table.append(headerRow([["Description"], ["Uncategorised"], ["Transactions", "balance"], ["Total", "balance"]]));
+  table.append(headerRow([["Description"], ["Uncategorised"], ["Transactions", "balance"], ["Total", "balance"], [""]]));
   for (const { description, direction, pence, transactions } of uncategorised) {
     const kind = direction === "Out" ? "Spending" : "Earnings";
     const total = el("td", { class: "balance" });
     total.append(figureButton(gbp(pence), `${description}, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
+    const make = el("button", { class: "make-rule", type: "button" }, "Make rule");
+    make.addEventListener("click", () => {
+      rulePanel.replaceChildren(ruleForm(description, uncategorised, categories, () => rulePanel.replaceChildren()));
+      contains(rulePanel).focus();
+    });
+    const action = el("td", { class: "balance" });
+    action.append(make);
     const row = el("tr");
-    row.append(el("td", { class: "description" }, description), el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total);
+    row.append(el("td", { class: "description" }, description), el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, action);
     table.append(row);
   }
-  section.append(table, panel);
+  section.append(scrolling(table), rulePanel, panel);
   return section;
 }
 
-function spendingSection({ months, uncategorised, rulesFile }: Report) {
+const contains = (node: HTMLElement) => node.querySelector<HTMLInputElement>('input[name="contains"]')!;
+
+/**
+ * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory or
+ * Transfer. While the text is edited it shows what the rule would catch. Saving adds the rule to the end of the rules
+ * file, then shows the Report again.
+ */
+function ruleForm(description: string, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
+  type Then = { label: string; rule: (contains: string) => CategorisationRule };
+  const choices: Then[] = [
+    ...categories.flatMap(({ name, subcategories }) =>
+      subcategories.map((subcategory): Then => ({ label: `${name} › ${subcategory}`, rule: (contains) => ({ contains, category: name, subcategory }) })),
+    ),
+    { label: "Transfer", rule: (contains) => ({ contains, transfer: true }) },
+  ];
+  const form = el("form", { class: "rule" });
+  const text = el("input", { name: "contains", type: "text", value: description, autocomplete: "off" });
+  const then = el("select", { name: "then" });
+  then.append(el("option", { value: "", disabled: "", selected: "" }, "Choose a Subcategory or Transfer"));
+  choices.forEach(({ label }, i) => then.append(el("option", { value: i }, label)));
+  const preview = el("div", { class: "preview muted", "aria-live": "polite" });
+  const showPreview = () => {
+    const { descriptionCount, spending, earnings } = previewRule(text.value, uncategorised);
+    if (descriptionCount === 0) {
+      preview.textContent = "Catches no Uncategorised descriptions.";
+      return;
+    }
+    const totals = [...(spending ? [`${gbp(spending)} Spending`] : []), ...(earnings ? [`${gbp(earnings)} Earnings`] : [])];
+    preview.textContent = `Catches ${descriptionCount} Uncategorised description${descriptionCount === 1 ? "" : "s"}: ${totals.join(", ") || gbp(0)}.`;
+  };
+  text.addEventListener("input", showPreview);
+  showPreview();
+  const error = el("div", { class: "error", role: "alert", hidden: "" });
+  const fail = (message: string) => {
+    error.textContent = message;
+    error.hidden = false;
+  };
+  const save = el("button", { type: "submit" }, "Save rule");
+  const cancel = el("button", { type: "button" }, "Cancel");
+  cancel.addEventListener("click", close);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const chosen = choices[Number(then.value)];
+    if (then.value === "" || !chosen) return fail("Choose a Subcategory or Transfer.");
+    if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
+    save.disabled = true;
+    const response: SaveResponse = await fetch("/rules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(chosen.rule(text.value)),
+    })
+      .then((r) => r.json() as Promise<SaveResponse>)
+      .catch(() => ({ error: "The tracker isn't responding, so the rule wasn't saved. Is it still running?" }));
+    if ("error" in response) {
+      save.disabled = false;
+      return fail(response.error);
+    }
+    await render();
+  });
+  const label = (text: string, field: HTMLElement) => {
+    const node = el("label", {}, text);
+    node.append(field);
+    return node;
+  };
+  const buttons = el("div", { class: "buttons" });
+  buttons.append(save, cancel);
+  form.append(
+    el("h3", {}, "Make a rule"),
+    label("Description contains", text),
+    label("Sort into", then),
+    preview,
+    el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
+    error,
+    buttons,
+  );
+  return form;
+}
+
+function spendingSection(report: Report) {
+  const { months, rulesFile } = report;
   const section = el("div");
   section.append(
     el("h2", {}, "Spending"),
@@ -501,11 +597,12 @@ function spendingSection({ months, uncategorised, rulesFile }: Report) {
         className: "net",
       },
     ], "In"),
-    uncategorisedList(uncategorised),
+    uncategorisedList(report),
   );
   return section;
 }
 
+/** Fetches the Report and shows it, in place of anything shown before, keeping the selected month. */
 async function render() {
   const content = document.getElementById("content")!;
   const report: ReportResponse = await fetch("/report")
@@ -513,6 +610,7 @@ async function render() {
     .catch(() => ({ error: "The tracker isn't responding. Is it still running? Start it with npm start, then refresh." }));
   content.replaceChildren();
   content.className = "";
+  monthSelection.forgetShows();
   if ("error" in report) {
     // Shown in place of the chart, since a Net Worth built from partly read Statements could look right and be wrong.
     const error = el("div", { class: "error", role: "alert" });
@@ -527,7 +625,7 @@ async function render() {
     content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
   // The latest full month starts selected.
-  monthSelection.select((months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
+  monthSelection.select(monthSelection.selected ?? (months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
   content.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(months),

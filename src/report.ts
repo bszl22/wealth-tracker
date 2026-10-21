@@ -29,11 +29,15 @@ export type ReportMonth = SpendingMonth & { snapshot: MonthEndSnapshot; netWorth
  */
 export type NetWorthChange = { since: IsoDate; change: Pence; net: Pence; otherChange: Pence };
 
-/** Everything the page shows: each month from Tracking Start through today, each Account's latest Balance, and the Uncategorised Transactions. */
+/**
+ * Everything the page shows: each month from Tracking Start through today, each Account's latest Balance, the
+ * Uncategorised Transactions, and the rules file's Categories to make rules with.
+ */
 export type Report = {
   months: ReportMonth[];
   accounts: AccountBalance[];
   uncategorised: UncategorisedDescription[];
+  categories: Category[];
   rulesFile: ReportInput["rulesFile"];
 };
 
@@ -57,7 +61,7 @@ export function buildReport({ statements: { balances, transactions }, categories
     const before = snapshots[i - 1];
     return { ...month, snapshot, netWorthChange: before && netWorthChange(before, snapshot, month.net) };
   });
-  return { months, accounts, uncategorised: spending.uncategorised, rulesFile };
+  return { months, accounts, uncategorised: spending.uncategorised, categories, rulesFile };
 }
 
 function netWorthChange(before: MonthEndSnapshot, after: MonthEndSnapshot, net: Pence): NetWorthChange {

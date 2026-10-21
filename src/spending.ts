@@ -1,3 +1,4 @@
+import { ruleMatches } from "./matching.js";
 import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
 import type { Direction, IsoDate, Pence, StatementTransaction } from "./statements.js";
 
@@ -145,8 +146,7 @@ function rankedUncategorised(matched: Matched[]): UncategorisedDescription[] {
 }
 
 function firstMatch(rules: CategorisationRule[], { description }: Transaction): CategorisationRule | undefined {
-  const lower = description.toLowerCase();
-  return rules.find((rule) => lower.includes(rule.contains.toLowerCase()));
+  return rules.find((rule) => ruleMatches(rule.contains, description));
 }
 
 /**

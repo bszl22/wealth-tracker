@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readRules } from "./rules.js";
+import { readRules, withRule } from "./rules.js";
 
 // Made-up rules files. Every Category, Subcategory and description is invented.
 const food = { name: "Food", kind: "Spending", subcategories: ["Groceries", "Eating Out"] };
@@ -109,5 +109,58 @@ describe("readRules", () => {
     expect(() => readRules(contents)).toThrow(
       'rules.json has a Category whose "kind" is not "Spending" or "Earnings": {"name":"Work","kind":"Income","subcategories":["Salary"]}',
     );
+  });
+});
+
+describe("withRule", () => {
+  it("appends the rule to the end of the rules list, leaving the Categories and earlier rules unchanged and in order, as 2-space JSON", () => {
+    const contents = rulesFile({
+      categories: [food, work],
+      rules: [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" }, { contains: "CARD BILL", transfer: true }],
+    });
+    expect(withRule(contents, { contains: "corner shop", category: "Food", subcategory: "Groceries" })).toBe(
+      JSON.stringify(
+        {
+          categories: [food, work],
+          rules: [
+            { contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" },
+            { contains: "CARD BILL", transfer: true },
+            { contains: "corner shop", category: "Food", subcategory: "Groceries" },
+          ],
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  });
+
+  it("fails when the rules file doesn't read cleanly, without quoting it", () => {
+    const halfEdited = '{ "categories": [], "rules": [ { "contains": "SECRET SHOP" ';
+    const unknownCategory = rulesFile({ categories: [], rules: [{ contains: "SECRET SHOP", category: "Fod", subcategory: "Groceries" }] });
+    for (const contents of [halfEdited, unknownCategory]) {
+      const save = () => withRule(contents, { contains: "CARD BILL", transfer: true });
+      expect(save).toThrow("rules.json doesn't read cleanly, so the rule wasn't saved. Fix rules.json, then reload the page to see the problem.");
+      expect(save).not.toThrow(/SECRET SHOP/);
+    }
+  });
+
+  it("fails on a rule the rules file reader would refuse, such as one naming an unknown Category, so a saved file always loads", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    for (const rule of [
+      { contains: "corner shop", category: "Fod", subcategory: "Groceries" },
+      { contains: "corner shop", category: "Food", subcategory: "Salary" },
+      { contains: " ", transfer: true },
+      "corner shop",
+    ]) {
+      expect(() => withRule(contents, rule)).toThrow(
+        'The rule wasn\'t saved. It needs "contains" text, and a Category and Subcategory from rules.json or Transfer.',
+      );
+    }
+  });
+
+  it("saves only the rule's \"contains\" text and its Category and Subcategory or Transfer", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    const saved = withRule(contents, { contains: "CARD BILL", transfer: true, category: "Food", note: "extra" });
+    expect(JSON.parse(saved).rules).toEqual([{ contains: "CARD BILL", transfer: true }]);
   });
 });

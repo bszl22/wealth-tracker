@@ -1,7 +1,8 @@
 import type { Balance } from "../netWorth.js";
-import type { Category, CategorisationRule } from "../rules.js";
+import { readRules, withRule, type Category, type CategorisationRule, type Rules } from "../rules.js";
 import { buildReport, type Report } from "../report.js";
 import { reconcileStatements, type StatementRead } from "../scanStatements.js";
+import type { Tracker } from "../server.js";
 import type { Transaction } from "../spending.js";
 import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from "../statements.js";
 
@@ -127,12 +128,28 @@ function madeUpReads(): StatementRead[] {
   return [...files].map(([file, accounts]) => ({ file, accounts: [...accounts.values()] }));
 }
 
-export const madeUpReport: Report = buildReport({
-  statements: reconcileStatements(madeUpReads()),
-  categories,
-  rules,
-  rulesFile: { path: "Made-up Statements/rules.json", found: true },
-  trackingStart: { year: 2026, month: 1 },
-  today: TODAY,
-});
+/** The made-up Report with the given Categories and rules. */
+function madeUpReportWith({ categories, rules }: Rules): Report {
+  return buildReport({
+    statements: reconcileStatements(madeUpReads()),
+    categories,
+    rules,
+    rulesFile: { path: "Made-up Statements/rules.json", found: true },
+    trackingStart: { year: 2026, month: 1 },
+    today: TODAY,
+  });
+}
+
+export const madeUpReport: Report = madeUpReportWith({ categories, rules });
+
+/** The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. */
+export function madeUpTracker(): Tracker {
+  let contents = JSON.stringify({ categories, rules }, null, 2) + "\n";
+  return {
+    report: async () => madeUpReportWith(readRules(contents)),
+    saveRule: async (rule) => {
+      contents = withRule(contents, rule);
+    },
+  };
+}
 

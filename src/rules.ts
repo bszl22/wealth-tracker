@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type CategoryKind = "Spending" | "Earnings";
@@ -10,7 +10,7 @@ export type CategorisationRule = { contains: string } & ({ category: string; sub
 
 export type Rules = { categories: Category[]; rules: CategorisationRule[] };
 
-/** The rules file, at the top of the data folder. The tracker only reads it, and doesn't yet create or write it. */
+/** The rules file, at the top of the data folder. The tracker reads it, and writes it only to save a rule made on the page (ADR 0001). */
 export const RULES_FILE = "rules.json";
 
 /** The rules file's Categories and rules, where it is, and whether it was there to read. */
@@ -19,11 +19,39 @@ export type LoadedRules = Rules & { path: string; found: boolean };
 /** Reads the rules file at the top of the data folder. A missing file means no rules. */
 export async function loadRules(dataFolder: string): Promise<LoadedRules> {
   const path = join(dataFolder, RULES_FILE);
-  const contents = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
+  const contents = await rulesFileContents(path);
+  return { ...readRules(contents), path, found: contents !== undefined };
+}
+
+async function rulesFileContents(path: string): Promise<string | undefined> {
+  return readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
     throw new Error(`${RULES_FILE} in the data folder can't be opened`);
   });
-  return { ...readRules(contents), path, found: contents !== undefined };
+}
+
+/** The save in progress, so saves made together each add their rule to the file the one before wrote. */
+let saving: Promise<unknown> = Promise.resolve();
+
+/**
+ * Rereads the rules file and saves it with `rule` added to the end, creating it if there is none. Writes a temporary
+ * file in the data folder and renames it over the rules file, so the rules file is never left half-written.
+ */
+export function saveRule(dataFolder: string, rule: unknown): Promise<void> {
+  const save = saving.then(async () => {
+    const path = join(dataFolder, RULES_FILE);
+    const updated = withRule(await rulesFileContents(path), rule);
+    const temporary = `${path}.saving`;
+    try {
+      await writeFile(temporary, updated, "utf8");
+      await rename(temporary, path);
+    } catch {
+      await rm(temporary, { force: true });
+      throw new Error(`${RULES_FILE} in the data folder can't be written, so the rule wasn't saved`);
+    }
+  });
+  saving = save.catch(() => undefined);
+  return save;
 }
 
 /** Reads a rules file's contents into its Categories and its Categorisation Rules in order. With no rules file, there are none. */
@@ -80,4 +108,27 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
     throw fail(`naming "${subcategory}", which is not a Subcategory of ${category.name}`);
   }
   return { contains, category: category.name, subcategory };
+}
+
+/**
+ * A rules file's contents with `rule` added to the end of its rules, as 2-space JSON, leaving its Categories and earlier
+ * rules unchanged and in order. Fails, quoting nothing from the file, when the file or the rule doesn't read cleanly.
+ */
+export function withRule(contents: string | undefined, rule: unknown): string {
+  try {
+    readRules(contents);
+  } catch {
+    // The reader's message quotes the file, so only says that it failed.
+    throw new Error(`${RULES_FILE} doesn't read cleanly, so the rule wasn't saved. Fix ${RULES_FILE}, then reload the page to see the problem.`);
+  }
+  const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { rules: unknown[] });
+  const { contains, category, subcategory, transfer } = (rule ?? {}) as Record<string, unknown>;
+  const added = transfer === true ? { contains, transfer } : { contains, category, subcategory };
+  const updated = JSON.stringify({ ...file, rules: [...file.rules, added] }, null, 2) + "\n";
+  try {
+    readRules(updated);
+  } catch {
+    throw new Error(`The rule wasn't saved. It needs "contains" text, and a Category and Subcategory from ${RULES_FILE} or Transfer.`);
+  }
+  return updated;
 }

@@ -102,5 +102,5 @@ The part of a month's change in Net Worth that Earnings minus Spending doesn't e
 _Avoid_: Unexplained, residual
 
 **Report**:
-Everything the tracker shows at once: each month from Tracking Start through today with its Month-End Snapshot, Spending, Earnings and change in Net Worth, plus each Account's latest Balance and the Uncategorised Transactions.
+Everything the tracker shows at once: each month from Tracking Start through today with its Month-End Snapshot, Spending, Earnings and change in Net Worth, plus each Account's latest Balance, the Uncategorised Transactions, and the Categories to make Categorisation Rules with.
 _Avoid_: Dashboard, summary

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { statementsReport } from "./report.js";
+import { saveRule } from "./rules.js";
 import { startServer } from "./server.js";
 import { loadSettings } from "./settings.js";
 
@@ -8,7 +9,7 @@ const PORT = 4321;
 
 try {
   const settings = await loadSettings(fileURLToPath(new URL("..", import.meta.url)));
-  await startServer(() => statementsReport(settings), PORT);
+  await startServer({ report: () => statementsReport(settings), saveRule: (rule) => saveRule(settings.dataFolder, rule) }, PORT);
   const url = `http://127.0.0.1:${PORT}/`;
   console.log(`Wealth Tracker is running at ${url}`);
   execFile("open", [url]);
