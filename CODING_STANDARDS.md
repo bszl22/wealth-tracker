@@ -23,3 +23,7 @@ Pair two lists by name, such as a Category's name or a month end, unless one mod
 ## Reconciled input
 
 The Net Worth and Spending calculators take Balances and Transactions as `reconcileStatements` gives them: one Balance per Account and date, each Transaction counted once. `buildReport` requires this through its `ReconciledStatements` type; the calculators rely on it without a type, so their own tests can build lists by hand. Flag any other caller that passes the calculators lists it built or filtered itself, and any overlap handling added outside `src/scanStatements.ts`.
+
+## Data leaving the Mac
+
+`SuggestionRequest` in `src/suggestions.ts` and the call in `src/claude.ts` send only what ADR 0003 lists, to the model the spec names. A change to either updates ADR 0003 and the Suggest rules panel's privacy text in the same change. Flag any option that can route the request to another model or destination, such as a server-side fallback.
