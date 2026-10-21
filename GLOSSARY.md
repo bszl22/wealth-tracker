@@ -33,7 +33,7 @@ _Avoid_: Institution (when meaning one account)
 
 **Statement**:
 A file issued by an Institution covering one or more Accounts over a period.
-_Avoid_: Export, report
+_Avoid_: Export, report (a report is the Report, never a Statement)
 
 **Closing Balance**:
 The Balance an Institution prints on a Statement for the end of its period. For investments, this is the printed valuation of holdings.
@@ -96,3 +96,7 @@ _Avoid_: Start date, epoch
 **Other Change**:
 The part of a month's change in Net Worth that Earnings minus Spending doesn't explain, such as investment growth or timing between purchases and Statement dates.
 _Avoid_: Unexplained, residual
+
+**Report**:
+Everything the tracker shows at once: each month from Tracking Start through today with its Month-End Snapshot, Spending, Earnings and change in Net Worth, plus each Account's latest Balance and the Uncategorised Transactions.
+_Avoid_: Dashboard, summary

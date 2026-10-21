@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { startServer, statementsReport } from "./server.js";
+import { statementsReport } from "./report.js";
+import { startServer } from "./server.js";
 import { loadSettings } from "./settings.js";
 
 const PORT = 4321;

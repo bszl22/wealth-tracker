@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MonthEndSnapshot } from "./netWorth.js";
+import { monthEndsFrom } from "./report.js";
 import type { Category, CategorisationRule } from "./rules.js";
 import {
   calculateSpending,
@@ -26,9 +26,9 @@ const work: Category = { name: "Work", kind: "Earnings", subcategories: ["Salary
 
 /** The months for Transactions in January 2026 alone, sorted by these Categories and rules. */
 const january = (transactions: Transaction[], categories: Category[], rules: CategorisationRule[]) =>
-  calculateSpending({ transactions, snapshots: [], categories, rules, trackingStart: january2026, today: "2026-01-31" } satisfies SpendingInput).months[0]!;
+  calculateSpending({ transactions, categories, rules, monthEnds: ["2026-01-31"], today: "2026-01-31" } satisfies SpendingInput).months[0]!;
 
-const noRules = { snapshots: [], categories: [], rules: [] };
+const noRules = { categories: [], rules: [] };
 
 /** A Category's figures alone, without the Transactions behind them. */
 const categoryFigures = ({ name, total, subcategories }: CategoryTotal) => ({
@@ -49,7 +49,7 @@ describe("calculateSpending", () => {
       hsbc("2026-01-31", "Out", 1),
       hsbc("2026-02-14", "Out", 4500),
     ];
-    const { months } = calculateSpending({ transactions, ...noRules, trackingStart: january2026, today: "2026-03-02" });
+    const { months } = calculateSpending({ transactions, ...noRules, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31"], today: "2026-03-02" });
     expect(
       months.map(({ monthEnd, spending, earnings, net }) => ({ monthEnd, spending: spending.uncategorised, earnings: earnings.uncategorised, net })),
     ).toEqual([
@@ -60,7 +60,7 @@ describe("calculateSpending", () => {
   });
 
   it("marks only the current month as partial", () => {
-    const { months } = calculateSpending({ transactions: [], ...noRules, trackingStart: january2026, today: "2026-03-02" });
+    const { months } = calculateSpending({ transactions: [], ...noRules, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31"], today: "2026-03-02" });
     expect(months.map((m) => [m.monthEnd, m.partial])).toEqual([
       ["2026-01-31", false],
       ["2026-02-28", false],
@@ -80,7 +80,7 @@ describe("calculateSpending", () => {
       hsbc("2026-01-27", "In", 320, "))) COFFEE PLACE", february),
       { ...coffee(february), account: "Kroo" },
     ];
-    const { months } = calculateSpending({ transactions, ...noRules, trackingStart: january2026, today: "2026-01-31" });
+    const { months } = calculateSpending({ transactions, ...noRules, monthEnds: ["2026-01-31"], today: "2026-01-31" });
     expect(months[0]?.spending.uncategorised).toBe(320 * 4);
     expect(months[0]?.earnings.uncategorised).toBe(320);
   });
@@ -159,10 +159,9 @@ describe("calculateSpending", () => {
     const february = hsbc("2026-02-02", "Out", 999, "CORNER SHOP");
     const { months } = calculateSpending({
       transactions: [shop, cafe, cafeRefund, salary, bill, mysteryOut, mysteryIn, february],
-      snapshots: [],
       categories: [food, work],
       rules,
-      trackingStart: january2026,
+      monthEnds: ["2026-01-31", "2026-02-28"],
       today: "2026-02-10",
     });
     const [january, februaryMonth] = months;
@@ -193,7 +192,7 @@ describe("calculateSpending", () => {
       mysteryIn,
       hsbc("2026-03-01", "Out", 999999, "VIS BAKERY"),
     ];
-    const { uncategorised } = calculateSpending({ transactions, snapshots: [], categories: [food], rules, trackingStart: january2026, today: "2026-02-28" });
+    const { uncategorised } = calculateSpending({ transactions, categories: [food], rules, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-28" });
     expect(uncategorised).toEqual([
       { description: "VIS BAKERY", direction: "Out", pence: 2050, transactions: [bakeryJanuary, bakeryFebruary] },
       { description: "GARAGE SERVICES", direction: "Out", pence: 2001, transactions: [garage] },
@@ -209,7 +208,7 @@ describe("What changed", () => {
     { contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" },
   ];
   const months = (transactions: Transaction[], today: string) =>
-    calculateSpending({ transactions, snapshots: [], categories: [food, work], rules, trackingStart: january2026, today }).months;
+    calculateSpending({ transactions, categories: [food, work], rules, monthEnds: monthEndsFrom(january2026, today), today }).months;
 
   /** A change's figures alone, without the Transactions behind it. */
   const changeFigures = ({ transactions: _, ...figures }: SubcategoryChange) => figures;
@@ -266,10 +265,9 @@ describe("What changed", () => {
         hsbc("2026-02-08", "In", 99999, "CR EMPLOYER LTD"),
         hsbc("2026-02-09", "Out", 99999, "CARD BILL PAYMENT"),
       ],
-      snapshots: [],
       categories: [food, work],
       rules: transferRules,
-      trackingStart: january2026,
+      monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31"],
       today: "2026-03-01",
     }).months;
     expect(february!.whatChanged?.largest).toEqual([spent[1], spent[3], spent[5], spent[2], spent[4]]);
@@ -283,37 +281,5 @@ describe("What changed", () => {
       february!.whatChanged!.changes.filter((c) => c.kind === "Spending").map((c) => [c.subcategory, c.transactions]),
     );
     expect(bySubcategory).toEqual({ Groceries: [groceries], "Eating Out": [], Uncategorised: [mystery] });
-  });
-});
-
-describe("Change in Net Worth", () => {
-  const rules: CategorisationRule[] = [
-    { contains: "CORNER SHOP", category: "Food", subcategory: "Groceries" },
-    { contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" },
-    { contains: "CARD BILL", transfer: true },
-  ];
-  // Made-up Month-End Snapshots. Every figure is invented.
-  const snapshot = (monthEnd: string, netWorth: number): MonthEndSnapshot => ({ monthEnd, assets: netWorth, liabilities: 0, netWorth });
-
-  it("breaks each month's change in Net Worth since the Snapshot before it into Earnings − Spending and Other Change, which add up exactly, from February", () => {
-    const { months } = calculateSpending({
-      transactions: [
-        hsbc("2026-01-05", "Out", 99999, "CORNER SHOP"),
-        hsbc("2026-02-05", "Out", 40000, "CORNER SHOP"),
-        hsbc("2026-02-20", "In", 250000, "CR EMPLOYER LTD"),
-        hsbc("2026-02-21", "Out", 80000, "CARD BILL PAYMENT"),
-        hsbc("2026-03-05", "Out", 10000, "CORNER SHOP"),
-      ],
-      snapshots: [snapshot("2026-01-31", 1000000), snapshot("2026-02-28", 1150000), snapshot("2026-03-31", 1120000)],
-      categories: [food, work],
-      rules,
-      trackingStart: january2026,
-      today: "2026-03-15",
-    });
-    expect(months.map((m) => m.netWorthChange)).toEqual([
-      undefined,
-      { since: "2026-01-31", change: 150000, net: 210000, otherChange: -60000 },
-      { since: "2026-02-28", change: -30000, net: -10000, otherChange: -20000 },
-    ]);
   });
 });

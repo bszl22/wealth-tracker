@@ -18,8 +18,6 @@ const assetsOnly = (monthEnd: string, pence: number): MonthEndSnapshot => ({
   netWorth: pence,
 });
 
-const january2026 = { year: 2026, month: 1 };
-
 describe("calculateNetWorth", () => {
   it("gives one Month-End Snapshot per month from Tracking Start through the current month, each using the latest Balance on or before the month's last day", () => {
     const balances = [
@@ -29,7 +27,7 @@ describe("calculateNetWorth", () => {
       hsbc("2026-02-01", 90000),
       hsbc("2026-03-10", 60000),
     ];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-04-03" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"], today: "2026-04-03" });
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 80000),
       assetsOnly("2026-02-28", 90000),
@@ -40,13 +38,13 @@ describe("calculateNetWorth", () => {
 
   it("uses the last Balance listed when several share a date", () => {
     const balances = [hsbc("2026-01-30", 10000), hsbc("2026-01-30", 20000), hsbc("2026-01-30", 15000)];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-01-31" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31"], today: "2026-01-31" });
     expect(snapshots).toEqual([assetsOnly("2026-01-31", 15000)]);
   });
 
   it("totals each Account's Balance to the penny", () => {
     const balances = [hsbc("2026-01-10", 10), { ...hsbc("2026-01-12", 20), account: "Savings" }];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-01-31" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31"], today: "2026-01-31" });
     expect(snapshots).toEqual([assetsOnly("2026-01-31", 30)]);
   });
 
@@ -68,7 +66,7 @@ describe("calculateNetWorth", () => {
       kroo("2026-01-31", 30000),
       kroo("2026-03-02", 40000),
     ];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-04-10" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"], today: "2026-04-10" });
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 30000),
       assetsOnly("2026-02-28", 30000),
@@ -80,7 +78,7 @@ describe("calculateNetWorth", () => {
   it("counts an Account only from its first Balance onward, adding it to the other Accounts after that", () => {
     const kroo: Balance = { statement: "Kroo/2025-26.pdf", account: "Kroo", kind: "Asset", date: "2026-02-10", pence: 5000, source: "Running" };
     const balances = [hsbc("2026-01-05", 100000), kroo];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-03-01" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31"], today: "2026-03-01" });
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 100000),
       assetsOnly("2026-02-28", 105000),
@@ -104,7 +102,7 @@ describe("calculateNetWorth", () => {
       vanguard("Vanguard ISA", "2026-03-31", 120000),
       vanguard("Vanguard General Account", "2026-03-31", 45000),
     ];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-05-02" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"], today: "2026-05-02" });
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 150000),
       assetsOnly("2026-02-28", 150000),
@@ -124,7 +122,7 @@ describe("calculateNetWorth", () => {
       source: "Closing",
     });
     const balances = [hsbc("2026-01-20", 300000), amex("2026-01-05", 47971), amex("2026-02-05", 158632)];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-10" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-10" });
     expect(snapshots).toEqual([
       { monthEnd: "2026-01-31", assets: 300000, liabilities: 47971, netWorth: 252029 },
       { monthEnd: "2026-02-28", assets: 300000, liabilities: 158632, netWorth: 141368 },
@@ -133,7 +131,7 @@ describe("calculateNetWorth", () => {
 
   it("carries a Balance from before Tracking Start into the first Month-End Snapshots", () => {
     const balances = [hsbc("2025-12-29", 50000), hsbc("2026-02-14", 65000)];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-20" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-20" });
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 50000),
       assetsOnly("2026-02-28", 65000),
@@ -142,7 +140,7 @@ describe("calculateNetWorth", () => {
 
   it("fails rather than guessing when two Statements give different Balances for the same Account and date, naming both Statements", () => {
     const balances = [hsbc("2026-01-31", 80000, "HSBC Statements/January.pdf"), hsbc("2026-01-31", 80001, "HSBC Statements/February.pdf")];
-    expect(() => calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-10" })).toThrow(
+    expect(() => calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-10" })).toThrow(
       "HSBC Statements/January.pdf and HSBC Statements/February.pdf give different Balances for HSBC on 2026-01-31",
     );
   });
@@ -156,7 +154,7 @@ describe("calculateNetWorth", () => {
       hsbc("2026-01-31", 80000, "HSBC Statements/Mid-January.pdf"),
       hsbc("2026-02-15", 90000, "HSBC Statements/Mid-January.pdf"),
     ];
-    const { snapshots } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-02-20" });
+    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-20" });
     expect(snapshots).toEqual([assetsOnly("2026-01-31", 80000), assetsOnly("2026-02-28", 90000)]);
   });
 });
@@ -169,7 +167,7 @@ describe("calculateNetWorth's Accounts", () => {
       hsbc("2026-10-02", 250000),
       { statement: "Kroo/2026-27.pdf", account: "Kroo", kind: "Asset", date: "2026-10-01", pence: 5000, source: "Running" },
     ];
-    const { accounts } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-10-20" });
+    const { accounts } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31"], today: "2026-10-20" });
     expect(accounts).toEqual([
       { account: "HSBC", kind: "Asset", date: "2026-10-02", pence: 250000, stale: false },
       { account: "Kroo", kind: "Asset", date: "2026-10-01", pence: 5000, stale: false },
@@ -182,7 +180,7 @@ describe("calculateNetWorth's Accounts", () => {
       { ...hsbc("2026-08-20", 100), account: "Two Months" },
       { ...hsbc("2026-08-19", 200), account: "Two Months And A Day" },
     ];
-    const { accounts } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-10-20" });
+    const { accounts } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31"], today: "2026-10-20" });
     expect(accounts.map(({ account, stale }) => ({ account, stale }))).toEqual([
       { account: "Two Months", stale: false },
       { account: "Two Months And A Day", stale: true },
@@ -193,7 +191,7 @@ describe("calculateNetWorth's Accounts", () => {
     const staleness = (today: string, dates: string[]) =>
       calculateNetWorth({
         balances: dates.map((date) => ({ ...hsbc(date, 100), account: date })),
-        trackingStart: january2026,
+        monthEnds: [],
         today,
       }).accounts.map(({ date, stale }) => ({ date, stale }));
     expect(staleness("2026-04-30", ["2026-02-27", "2026-02-28"])).toEqual([
@@ -208,7 +206,7 @@ describe("calculateNetWorth's Accounts", () => {
 
   it("still counts a stale Account in every Month-End Snapshot", () => {
     const balances = [hsbc("2026-01-10", 100000), { ...hsbc("2026-02-20", 50000), account: "Kroo" }];
-    const { snapshots, accounts } = calculateNetWorth({ balances, trackingStart: january2026, today: "2026-05-01" });
+    const { snapshots, accounts } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"], today: "2026-05-01" });
     expect(accounts.find((a) => a.account === "HSBC")?.stale).toBe(true);
     expect(snapshots).toEqual([
       assetsOnly("2026-01-31", 100000),

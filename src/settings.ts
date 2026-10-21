@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { YearMonth } from "./netWorth.js";
+import type { YearMonth } from "./report.js";
 
 export type Settings = { dataFolder: string; trackingStart: YearMonth };
 

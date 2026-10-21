@@ -1,6 +1,7 @@
 import type { Balance } from "../netWorth.js";
 import type { Category, CategorisationRule } from "../rules.js";
-import { buildReport, startServer } from "../server.js";
+import { buildReport } from "../report.js";
+import { startServer } from "../server.js";
 import type { Transaction } from "../spending.js";
 import type { AccountKind, Direction, IsoDate, Pence } from "../statements.js";
 

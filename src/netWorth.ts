@@ -3,8 +3,6 @@ import type { AccountKind, IsoDate, Pence, StatementBalance } from "./statements
 /** A Balance from any Statement, tagged with the Account it belongs to and the Statement file it came from. */
 export type Balance = StatementBalance & { statement: string; account: string; kind: AccountKind };
 
-export type YearMonth = { year: number; month: number };
-
 /** A Liability holds the Balance owed as a positive number, so Net Worth is the Assets less the Liabilities. */
 export type MonthEndSnapshot = { monthEnd: IsoDate; assets: Pence; liabilities: Pence; netWorth: Pence };
 
@@ -14,16 +12,18 @@ export type AccountBalance = Omit<Balance, "source" | "statement"> & { stale: bo
 export type NetWorthInput = {
   /** Every Balance from every Statement, each Statement's Balances in the order it lists them. */
   balances: Balance[];
-  trackingStart: YearMonth;
+  /** The last day of each month to give a Month-End Snapshot for, in order. */
+  monthEnds: IsoDate[];
   today: IsoDate;
 };
 
-export function calculateNetWorth({ balances, trackingStart, today }: NetWorthInput): {
+/** One Month-End Snapshot per given month end, in the order given, and each Account's latest Balance on or before today. */
+export function calculateNetWorth({ balances, monthEnds, today }: NetWorthInput): {
   snapshots: MonthEndSnapshot[];
   accounts: AccountBalance[];
 } {
   checkStatementsAgree(balances);
-  const snapshots = monthEndsFrom(trackingStart, today).map((monthEnd): MonthEndSnapshot => {
+  const snapshots = monthEnds.map((monthEnd): MonthEndSnapshot => {
     const latest = [...latestBalancesOnOrBefore(balances, monthEnd).values()];
     const assets = sum(latest.filter((b) => b.kind === "Asset"));
     const liabilities = sum(latest.filter((b) => b.kind === "Liability"));
@@ -73,32 +73,11 @@ function sum(balances: Balance[]): Pence {
   return balances.reduce((total, b) => total + b.pence, 0);
 }
 
-/** The last day of each month from Tracking Start through the month holding today. */
-export function monthEndsFrom(start: YearMonth, today: IsoDate): IsoDate[] {
-  const [thisYear, thisMonth] = today.split("-").map(Number) as [number, number];
-  const monthEnds: IsoDate[] = [];
-  let { year, month } = start;
-  while (year < thisYear || (year === thisYear && month <= thisMonth)) {
-    monthEnds.push(lastDayOf(year, month));
-    if (month === 12) {
-      year += 1;
-      month = 1;
-    } else {
-      month += 1;
-    }
-  }
-  return monthEnds;
-}
-
 /** The same day 2 months earlier, or that month's last day when it is shorter. */
 function twoMonthsBefore(today: IsoDate): IsoDate {
   const [thisYear, thisMonth, thisDay] = today.split("-").map(Number) as [number, number, number];
   const [year, month] = thisMonth > 2 ? [thisYear, thisMonth - 2] : [thisYear - 1, thisMonth + 10];
   return isoDate(year, month, Math.min(thisDay, daysIn(year, month)));
-}
-
-function lastDayOf(year: number, month: number): IsoDate {
-  return isoDate(year, month, daysIn(year, month));
 }
 
 function daysIn(year: number, month: number): number {

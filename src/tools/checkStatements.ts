@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { calculateNetWorth } from "../netWorth.js";
+import { localToday, monthEndsFrom } from "../report.js";
 import { readStatements, scanStatements } from "../scanStatements.js";
-import { localToday } from "../server.js";
 import { loadSettings } from "../settings.js";
 import type { Pence } from "../statements.js";
 
@@ -28,7 +28,8 @@ try {
     }
   }
   const { balances } = await scanStatements(settings.dataFolder);
-  const { snapshots } = calculateNetWorth({ balances, trackingStart: settings.trackingStart, today: localToday() });
+  const today = localToday();
+  const { snapshots } = calculateNetWorth({ balances, monthEnds: monthEndsFrom(settings.trackingStart, today), today });
   console.log("\nMonth-End Snapshots (Net Worth = Assets - Liabilities)");
   for (const { monthEnd, assets, liabilities, netWorth } of snapshots) {
     console.log(`  ${monthEnd}  ${pounds(netWorth)} = ${pounds(assets)} - ${pounds(liabilities)}`);

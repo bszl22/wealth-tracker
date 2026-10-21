@@ -1,7 +1,7 @@
-import type { AccountBalance, MonthEndSnapshot } from "./netWorth.js";
+import type { AccountBalance } from "./netWorth.js";
+import type { Report, ReportMonth, ReportResponse } from "./report.js";
 import type { Category, CategoryKind } from "./rules.js";
-import type { Report, ReportResponse } from "./server.js";
-import type { Breakdown, SpendingMonth, Transaction, UncategorisedDescription } from "./spending.js";
+import type { Breakdown, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
@@ -75,7 +75,7 @@ function valueAxis(svg: SVGSVGElement, pence: Pence[], top: number, bottom: numb
 }
 
 /** Month labels along the bottom of a chart, with "so far" under the current month. */
-function monthLabels(svg: SVGSVGElement, months: SpendingMonth[], height: number) {
+function monthLabels(svg: SVGSVGElement, months: ReportMonth[], height: number) {
   const x = monthX(months.length);
   months.forEach((month, i) => {
     const label = svgEl("text", { x: x(i), y: height - 22, "text-anchor": "middle" }, monthLabel(month.monthEnd));
@@ -88,7 +88,7 @@ function monthLabels(svg: SVGSVGElement, months: SpendingMonth[], height: number
  * Shades the selected month's band on a chart, and selects the month whose band is clicked. Called before the chart
  * draws its marks, so the shading sits behind them.
  */
-function selectableMonths(svg: SVGSVGElement, months: SpendingMonth[], top: number, bottom: number) {
+function selectableMonths(svg: SVGSVGElement, months: ReportMonth[], top: number, bottom: number) {
   const x = monthX(months.length), band = monthBand(months.length);
   const shades = months.map((_, i) => svgEl("rect", { class: "month-band", x: x(i) - band / 2, y: top, width: band, height: bottom - top }));
   svg.append(...shades);
@@ -103,13 +103,14 @@ function selectableMonths(svg: SVGSVGElement, months: SpendingMonth[], top: numb
   );
 }
 
-function chart(snapshots: MonthEndSnapshot[], months: SpendingMonth[]) {
+function chart(months: ReportMonth[]) {
   const height = 360, top = 10, bottom = height - 40;
   const svg = svgEl("svg", { viewBox: `0 0 ${CHART_WIDTH} ${height}`, role: "img", "aria-label": "Net Worth, total Assets and total Liabilities at each month end" });
   selectableMonths(svg, months, top, bottom);
+  const snapshots = months.map((month) => month.snapshot);
   const y = valueAxis(svg, snapshots.flatMap((s) => SERIES.map(({ key }) => s[key])), top, bottom);
   monthLabels(svg, months, height);
-  const x = monthX(snapshots.length);
+  const x = monthX(months.length);
   // Drawn in reverse so the Net Worth line sits on top.
   for (const { key, label } of [...SERIES].reverse()) {
     svg.append(svgEl("polyline", { class: key, points: snapshots.map((s, i) => `${x(i)},${y(s[key])}`).join(" ") }));
@@ -128,8 +129,8 @@ function niceStep(raw: number): number {
 }
 
 /** Spending per month as one bar stacked by Spending Category, then Uncategorised, on the Net Worth chart's month axis. */
-function spendingChart(months: SpendingMonth[], categories: Category[]) {
-  type Series = { className: string; label: string; pence: (m: SpendingMonth) => Pence };
+function spendingChart(months: ReportMonth[], categories: Category[]) {
+  type Series = { className: string; label: string; pence: (m: ReportMonth) => Pence };
   const series: Series[] = [
     ...categories
       .filter((category) => category.kind === "Spending")
@@ -188,7 +189,7 @@ function accountTable(accounts: AccountBalance[]) {
   return table;
 }
 
-const monthHeading = (month: SpendingMonth) => (month.partial ? `${monthLabel(month.monthEnd)} so far` : monthLabel(month.monthEnd));
+const monthHeading = (month: ReportMonth) => (month.partial ? `${monthLabel(month.monthEnd)} so far` : monthLabel(month.monthEnd));
 
 /**
  * The Transactions behind a figure: date, Account, description and amount. Amounts moving the figure the other way,
@@ -239,13 +240,13 @@ function figureButton(text: string, title: string, transactions: Transaction[], 
 /** One row of a month table: its figure and the Transactions behind it in each month, and any subrows. */
 type FigureRow = {
   label: string;
-  pence: (m: SpendingMonth) => Pence;
-  transactions?: (m: SpendingMonth) => Transaction[];
+  pence: (m: ReportMonth) => Pence;
+  transactions?: (m: ReportMonth) => Transaction[];
   className?: string;
   subrows?: FigureRow[];
 };
 
-function monthTable(heading: string, months: SpendingMonth[], rows: FigureRow[], adds: Direction) {
+function monthTable(heading: string, months: ReportMonth[], rows: FigureRow[], adds: Direction) {
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table", { class: "months" });
   // Each month's cells, its header first, so the selected month's column can be shaded.
@@ -333,7 +334,7 @@ const signed = (pence: Pence) => (pence > 0 ? `+${gbp(pence)}` : pence < 0 ? `âˆ
  * "What changed" in the selected month: the Subcategories that moved most against the months before it, and its
  * largest Spending Transactions, each line listing its Transactions when clicked.
  */
-function whatChangedPanel(months: SpendingMonth[]) {
+function whatChangedPanel(months: ReportMonth[]) {
   return monthPanel(months, "What changed", (month) => monthLabel(month.monthEnd), (month, body) => {
     if (month.partial) {
       body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} isn't over yet, so it isn't compared with earlier months.`));
@@ -382,10 +383,10 @@ function whatChangedPanel(months: SpendingMonth[]) {
  * A heading and body following the selected month: the heading names the month, and `show` fills the body for it.
  */
 function monthPanel(
-  months: SpendingMonth[],
+  months: ReportMonth[],
   title: string,
-  label: (month: SpendingMonth) => string,
-  show: (month: SpendingMonth, body: HTMLElement) => void,
+  label: (month: ReportMonth) => string,
+  show: (month: ReportMonth, body: HTMLElement) => void,
   className?: string,
 ) {
   const section = el("div", className ? { class: className } : {});
@@ -402,7 +403,7 @@ function monthPanel(
 }
 
 /** The selected month's change in Net Worth, as Earnings âˆ’ Spending plus Other Change. */
-function netWorthChangePanel(months: SpendingMonth[]) {
+function netWorthChangePanel(months: ReportMonth[]) {
   return monthPanel(months, "Change in Net Worth", monthHeading, (month, body) => {
     if (!month.netWorthChange) {
       body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} is Tracking Start, so there's no earlier Month-End Snapshot to change from.`));
@@ -431,7 +432,7 @@ function netWorthChangePanel(months: SpendingMonth[]) {
 const breakdownTransactions = (breakdown: Breakdown): Transaction[] => [...breakdown.categories.flatMap((c) => c.transactions), ...breakdown.uncategorisedTransactions];
 
 /** One row per Category of the kind, expandable into its Subcategories, then Uncategorised and the total. */
-function breakdownRows(categories: Category[], kind: CategoryKind, figures: (m: SpendingMonth) => Breakdown): FigureRow[] {
+function breakdownRows(categories: Category[], kind: CategoryKind, figures: (m: ReportMonth) => Breakdown): FigureRow[] {
   const rows = categories
     .filter((category) => category.kind === kind)
     .map((category, i): FigureRow => ({
@@ -456,7 +457,7 @@ function breakdownRows(categories: Category[], kind: CategoryKind, figures: (m: 
   ];
 }
 
-function rulesFileNote({ path, found }: Report["spending"]["rulesFile"]) {
+function rulesFileNote({ path, found }: Report["rulesFile"]) {
   if (found) return el("div", { class: "muted" }, "Sorted into Categories by your Categorisation Rules. Money in under a Spending Category is a Refund, reducing it. Transfers count as neither Spending nor Earnings.");
   const note = el("div", { class: "muted" });
   note.append(
@@ -491,7 +492,7 @@ function uncategorisedList(uncategorised: UncategorisedDescription[]) {
   return section;
 }
 
-function spendingSection({ months, uncategorised, categories, rulesFile }: Report["spending"]) {
+function spendingSection({ months, uncategorised, categories, rulesFile }: Report) {
   const section = el("div");
   section.append(
     el("h2", {}, "Spending"),
@@ -527,23 +528,23 @@ async function render() {
     content.append(error);
     return;
   }
-  const latest = report.snapshots.at(-1);
+  const { months, categories } = report;
+  const latest = months.at(-1)?.snapshot;
   if (latest) {
     content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
     content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
-  // Both calculators give the same months, from Tracking Start through the current one. The latest full month starts selected.
-  const { months, categories } = report.spending;
+  // The latest full month starts selected.
   monthSelection.select((months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
   content.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
-    chart(report.snapshots, months),
+    chart(months),
     spendingChart(months, categories),
     netWorthChangePanel(months),
     whatChangedPanel(months),
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),
-    spendingSection(report.spending),
+    spendingSection(report),
   );
 }
 render();
