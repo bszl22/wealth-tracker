@@ -24,6 +24,29 @@ export type SpendingMonth = {
   spending: Breakdown;
   earnings: Breakdown;
   net: Pence;
+  /** How the month differs from the months before it, for a full month with an earlier month since Tracking Start. */
+  whatChanged: WhatChanged | undefined;
+};
+
+/**
+ * A full month against the average of up to 3 months before it since Tracking Start: each Subcategory's change, largest
+ * first, and the month's largest single Spending Transactions.
+ */
+export type WhatChanged = { comparedWith: IsoDate[]; changes: SubcategoryChange[]; largest: Transaction[] };
+
+/**
+ * One Subcategory's figure in a month, or Uncategorised's, against its average over the months compared with, rounded
+ * to the penny, with the month's Transactions behind it.
+ */
+export type SubcategoryChange = {
+  kind: CategoryKind;
+  /** The Category, or none for Uncategorised. */
+  category: string | undefined;
+  subcategory: string;
+  pence: Pence;
+  average: Pence;
+  change: Pence;
+  transactions: Transaction[];
 };
 
 /** Every Uncategorised Transaction with one description and direction, and their total. */
@@ -55,15 +78,55 @@ export function calculateSpending({ transactions, categories, rules, trackingSta
   const matched = withoutOverlaps(transactions)
     .filter(({ date }) => shown.has(date.slice(0, 7)))
     .map((transaction): Matched => ({ transaction, rule: firstMatch(rules, transaction) }));
-  const months = monthEnds.map((monthEnd): SpendingMonth => {
+  const months = monthEnds.map((monthEnd) => {
     const inMonth = matched.filter(({ transaction }) => transaction.date.slice(0, 7) === monthEnd.slice(0, 7));
     const spending = breakdown("Spending", categories, inMonth);
     const earnings = breakdown("Earnings", categories, inMonth);
     const partial = monthEnd.slice(0, 7) === today.slice(0, 7);
     return { monthEnd, partial, spending, earnings, net: earnings.total - spending.total };
   });
-  return { months, uncategorised: rankedUncategorised(matched) };
+  return {
+    months: months.map((month, i): SpendingMonth => ({
+      ...month,
+      whatChanged: month.partial || i === 0 ? undefined : whatChanged(month, months.slice(Math.max(0, i - COMPARED_MONTHS), i)),
+    })),
+    uncategorised: rankedUncategorised(matched),
+  };
 }
+
+/** How many months before a month its "What changed" compares with, when there are that many since Tracking Start. */
+const COMPARED_MONTHS = 3;
+
+type MonthFigures = Omit<SpendingMonth, "whatChanged">;
+
+function whatChanged(month: MonthFigures, earlier: MonthFigures[]): WhatChanged {
+  const changes = (["Spending", "Earnings"] as const).flatMap((kind) => {
+    const breakdownOf = (m: MonthFigures) => (kind === "Spending" ? m.spending : m.earnings);
+    // Every month lists the same Subcategories in the same order, then Uncategorised, so lines pair up by position.
+    const subcategoryLines = (m: MonthFigures): Omit<SubcategoryChange, "kind" | "average" | "change">[] => [
+      ...breakdownOf(m).categories.flatMap(({ name, subcategories }) =>
+        subcategories.map(({ name: subcategory, pence, transactions }) => ({ category: name, subcategory, pence, transactions })),
+      ),
+      { category: undefined, subcategory: "Uncategorised", pence: breakdownOf(m).uncategorised, transactions: breakdownOf(m).uncategorisedTransactions },
+    ];
+    const earlierLines = earlier.map(subcategoryLines);
+    return subcategoryLines(month).map((line, position): SubcategoryChange => {
+      const average = Math.round(earlierLines.reduce((total, lines) => total + lines[position]!.pence, 0) / earlier.length);
+      return { kind, ...line, average, change: line.pence - average };
+    });
+  });
+  // A stable sort, so equal changes keep the order the rules file lists them.
+  changes.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+  const spent = [...month.spending.categories.flatMap((c) => c.transactions), ...month.spending.uncategorisedTransactions];
+  const largest = spent
+    .filter(({ direction }) => direction === "Out")
+    .sort((a, b) => b.pence - a.pence)
+    .slice(0, LARGEST_TRANSACTIONS);
+  return { comparedWith: earlier.map(({ monthEnd }) => monthEnd), changes, largest };
+}
+
+/** How many of a month's largest Spending Transactions its "What changed" lists. */
+const LARGEST_TRANSACTIONS = 5;
 
 /** Groups the Transactions no rule matches by description and direction, so the largest unsorted money comes first. */
 function rankedUncategorised(matched: Matched[]): UncategorisedDescription[] {

@@ -47,7 +47,7 @@
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--grid); }
   th { font-weight: 600; font-size: 13px; color: var(--muted); }
-  td.balance, th.balance { text-align: right; }
+  td.balance, th.balance { text-align: right; white-space: nowrap; }
   .stale { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--error-bg); color: var(--error-fg); }
   .error { background: var(--error-bg); color: var(--error-fg); padding: 16px 20px; border-radius: 8px; border-left: 4px solid var(--error-fg); white-space: pre-wrap; margin-top: 16px; }
   .error h2 { margin: 0 0 8px; color: inherit; }
@@ -68,6 +68,7 @@
   .transactions { margin-top: 12px; padding: 12px 16px; border: 1px solid var(--grid); border-radius: 8px; }
   .transactions h3 { font-size: 14px; margin: 0 0 4px; }
   .transactions td.description { white-space: normal; }
+  .what-changed h3 { font-size: 14px; margin: 16px 0 4px; }
 </style>
 </head>
 <body>
@@ -371,6 +372,76 @@ function revealColumn(scroll, th) {
   else if (th.offsetLeft + th.offsetWidth > scroll.scrollLeft + scroll.clientWidth) scroll.scrollLeft = th.offsetLeft + th.offsetWidth - scroll.clientWidth;
 }
 
+/** A table that scrolls sideways when it is wider than the page. */
+function scrolling(table) {
+  const scroll = el("div", { class: "scroll" });
+  scroll.append(table);
+  return scroll;
+}
+
+/** How many of a month's changes "What changed" shows, largest first. */
+const SHOWN_CHANGES = 8;
+
+const signed = (pence) => (pence > 0 ? `+${gbp(pence)}` : pence < 0 ? `−${gbp(-pence)}` : gbp(0));
+
+/**
+ * "What changed" in the selected month: the Subcategories that moved most against the months before it, and its
+ * largest Spending Transactions, each line listing its Transactions when clicked.
+ */
+function whatChangedPanel(months) {
+  const section = el("div", { class: "what-changed" });
+  const body = el("div");
+  const heading = el("h2");
+  section.append(heading, body);
+  monthSelection.follow((selected) => {
+    const month = months.find((m) => m.monthEnd === selected);
+    body.replaceChildren();
+    heading.textContent = month ? `What changed in ${monthLabel(month.monthEnd)}` : "What changed";
+    if (!month) return;
+    if (month.partial) {
+      body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} isn't over yet, so it isn't compared with earlier months.`));
+      return;
+    }
+    if (!month.whatChanged) {
+      body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} is Tracking Start, so there's no earlier month to compare it with.`));
+      return;
+    }
+    const { comparedWith, changes, largest } = month.whatChanged;
+    const panel = el("div", { class: "transactions-panel" });
+    body.append(el("div", { class: "muted" }, `Against the average of ${comparedWith.map(monthLabel).join(", ")}. Click a figure to see its Transactions.`));
+    const moved = changes.filter((c) => c.change !== 0).slice(0, SHOWN_CHANGES);
+    if (moved.length === 0) body.append(el("div", { class: "muted" }, "No Subcategory changed."));
+    else {
+      const table = el("table");
+      // The change sits next to its name, so it stays in view at phone width. Spending is the usual case, so only Earnings is labelled.
+      table.append(headerRow([["Subcategory"], ["Change", "balance"], [monthLabel(month.monthEnd), "balance"], ["Average", "balance"]]));
+      for (const { kind, category, subcategory, pence, average, change, transactions } of moved) {
+        const name = `${category ? `${category} › ${subcategory}` : subcategory}${kind === "Earnings" ? " (Earnings)" : ""}`;
+        const changeCell = el("td", { class: "balance" });
+        changeCell.append(figureButton(signed(change), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, kind === "Spending" ? "Out" : "In", panel));
+        const row = el("tr");
+        row.append(el("td", {}, name), changeCell, el("td", { class: "balance" }, gbp(pence)), el("td", { class: "balance" }, gbp(average)));
+        table.append(row);
+      }
+      body.append(scrolling(table));
+    }
+    if (largest.length > 0) {
+      const table = el("table");
+      table.append(headerRow([["Date"], ["Account"], ["Description"], ["Amount", "balance"]]));
+      for (const transaction of largest) {
+        const amount = el("td", { class: "balance" });
+        amount.append(figureButton(gbp(transaction.pence), `${transaction.description}, ${dayLabel(transaction.date)}`, [transaction], "Out", panel));
+        const row = el("tr");
+        row.append(el("td", {}, dayLabel(transaction.date)), el("td", {}, transaction.account), el("td", { class: "description" }, transaction.description), amount);
+        table.append(row);
+      }
+      body.append(el("h3", {}, "Largest Spending Transactions"), scrolling(table));
+    }
+    body.append(panel);
+  });
+  return section;
+}
+
 /** Every Transaction behind a month's Spending or Earnings. */
 const breakdownTransactions = (breakdown) => [...breakdown.categories.flatMap((c) => c.transactions), ...breakdown.uncategorisedTransactions];
 
@@ -483,6 +554,7 @@ async function render() {
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(report.snapshots, months),
     spendingChart(months, categories),
+    whatChangedPanel(months),
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),
     spendingSection(report.spending),

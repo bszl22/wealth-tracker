@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Category, CategorisationRule } from "./rules.js";
-import { calculateSpending, type Breakdown, type CategoryTotal, type SpendingInput, type Transaction } from "./spending.js";
+import {
+  calculateSpending,
+  type Breakdown,
+  type CategoryTotal,
+  type SpendingInput,
+  type SubcategoryChange,
+  type Transaction,
+} from "./spending.js";
 
 // Made-up Transactions. Every description and figure is invented.
 const hsbc = (
@@ -190,5 +197,88 @@ describe("calculateSpending", () => {
       { description: "GARAGE SERVICES", direction: "Out", pence: 2001, transactions: [garage] },
       { description: "VIS BAKERY", direction: "In", pence: 300, transactions: [mysteryIn] },
     ]);
+  });
+});
+
+describe("What changed", () => {
+  const rules: CategorisationRule[] = [
+    { contains: "CORNER SHOP", category: "Food", subcategory: "Groceries" },
+    { contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" },
+    { contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary" },
+  ];
+  const months = (transactions: Transaction[], today: string) =>
+    calculateSpending({ transactions, categories: [food, work], rules, trackingStart: january2026, today }).months;
+
+  /** A change's figures alone, without the Transactions behind it. */
+  const changeFigures = ({ transactions: _, ...figures }: SubcategoryChange) => figures;
+
+  it("gives each Subcategory's change against the average of the 3 months before, largest change first", () => {
+    const shop = (date: string, pence: number) => hsbc(date, "Out", pence, "CORNER SHOP");
+    const cafe = (date: string, pence: number) => hsbc(date, "Out", pence, "CORNER CAFE");
+    const may = months(
+      [
+        shop("2026-01-05", 99999),
+        shop("2026-02-05", 10000), cafe("2026-02-06", 3000),
+        shop("2026-03-05", 20000), cafe("2026-03-06", 3000),
+        shop("2026-04-05", 30001), cafe("2026-04-06", 3000),
+        shop("2026-05-05", 19000), cafe("2026-05-06", 9000), hsbc("2026-05-07", "Out", 500, "MYSTERY MERCHANT"),
+      ],
+      "2026-06-10",
+    )[4]!;
+    expect(may.whatChanged?.comparedWith).toEqual(["2026-02-28", "2026-03-31", "2026-04-30"]);
+    expect(may.whatChanged?.changes.map(changeFigures)).toEqual([
+      { kind: "Spending", category: "Food", subcategory: "Eating Out", pence: 9000, average: 3000, change: 6000 },
+      { kind: "Spending", category: "Food", subcategory: "Groceries", pence: 19000, average: 20000, change: -1000 },
+      { kind: "Spending", category: undefined, subcategory: "Uncategorised", pence: 500, average: 0, change: 500 },
+      { kind: "Earnings", category: "Work", subcategory: "Salary", pence: 0, average: 0, change: 0 },
+      { kind: "Earnings", category: "Work", subcategory: "Bonus", pence: 0, average: 0, change: 0 },
+      { kind: "Earnings", category: undefined, subcategory: "Uncategorised", pence: 0, average: 0, change: 0 },
+    ]);
+  });
+
+  it("compares February with January alone and March with January and February, and gives January none", () => {
+    const shop = (date: string, pence: number) => hsbc(date, "Out", pence, "CORNER SHOP");
+    const [january, february, march] = months([shop("2026-01-05", 1000), shop("2026-02-05", 3000), shop("2026-03-05", 5000)], "2026-04-01");
+    expect(january!.whatChanged).toBeUndefined();
+    expect(february!.whatChanged?.comparedWith).toEqual(["2026-01-31"]);
+    expect(changeFigures(february!.whatChanged!.changes[0]!)).toMatchObject({ subcategory: "Groceries", average: 1000, change: 2000 });
+    expect(march!.whatChanged?.comparedWith).toEqual(["2026-01-31", "2026-02-28"]);
+    expect(changeFigures(march!.whatChanged!.changes[0]!)).toMatchObject({ subcategory: "Groceries", average: 2000, change: 3000 });
+  });
+
+  it("gives the current, partial month no What changed", () => {
+    const [, february] = months([hsbc("2026-02-05", "Out", 3000, "CORNER SHOP")], "2026-02-20");
+    expect(february!.partial).toBe(true);
+    expect(february!.whatChanged).toBeUndefined();
+  });
+
+  it("lists the month's 5 largest Spending Transactions, largest first, leaving out Refunds, Earnings and Transfers", () => {
+    const transferRules: CategorisationRule[] = [...rules, { contains: "CARD BILL", transfer: true }];
+    const shop = (day: string, pence: number) => hsbc(`2026-02-${day}`, "Out", pence, "CORNER SHOP");
+    const spent = [shop("01", 100), shop("02", 600), shop("03", 300), hsbc("2026-02-04", "Out", 500, "MYSTERY MERCHANT"), shop("05", 200), shop("06", 400)];
+    const [, february] = calculateSpending({
+      transactions: [
+        hsbc("2026-01-10", "Out", 99999, "CORNER SHOP"),
+        ...spent,
+        hsbc("2026-02-07", "In", 99999, "CORNER CAFE"),
+        hsbc("2026-02-08", "In", 99999, "CR EMPLOYER LTD"),
+        hsbc("2026-02-09", "Out", 99999, "CARD BILL PAYMENT"),
+      ],
+      categories: [food, work],
+      rules: transferRules,
+      trackingStart: january2026,
+      today: "2026-03-01",
+    }).months;
+    expect(february!.whatChanged?.largest).toEqual([spent[1], spent[3], spent[5], spent[2], spent[4]]);
+  });
+
+  it("gives each change the month's Transactions behind it", () => {
+    const groceries = hsbc("2026-02-05", "Out", 3000, "CORNER SHOP");
+    const mystery = hsbc("2026-02-06", "Out", 700, "MYSTERY MERCHANT");
+    const [, february] = months([hsbc("2026-01-05", "Out", 1000, "CORNER SHOP"), groceries, mystery], "2026-03-01");
+    const bySubcategory = Object.fromEntries(
+      february!.whatChanged!.changes.filter((c) => c.kind === "Spending").map((c) => [c.subcategory, c.transactions]),
+    );
+    expect(bySubcategory).toEqual({ Groceries: [groceries], "Eating Out": [], Uncategorised: [mystery] });
   });
 });
