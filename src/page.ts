@@ -1,12 +1,12 @@
-import { previewRule } from "./matching.js";
+import { previewRule, ruleMatches } from "./matching.js";
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
 import type { Category, CategoryKind, RuleToSave } from "./rules.js";
-import type { SaveResponse } from "./server.js";
+import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 import type { Subscriptions } from "./subscriptions.js";
-import { suggestionRequest, type SentDescription } from "./suggestions.js";
+import { aboutToSend, type SentDescription, type SuggestedRule } from "./suggestions.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
 const dayLabel = (iso: IsoDate) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -505,20 +505,26 @@ function uncategorisedList(report: Report) {
   return section;
 }
 
+/** Suggested Rules from the last press of Suggest rules, until each is approved or rejected. Gone when the page closes. */
+let suggested: SuggestedRule[] = [];
+
 /**
- * The Suggest rules panel: exactly what asking Claude would send, each row with a tickbox, ticked to start, and the
- * button, disabled when no API key is set. Pressing it sends nothing yet.
+ * The Suggest rules panel: exactly what asking Claude sends, each row with a tickbox, ticked to start, and the button,
+ * disabled when no API key is set. Each press sends the ticked rows and the Categories once, then shows the Suggested
+ * Rules in place of any shown before, or, leaving those in place, why there are none.
  */
-function suggestRules({ uncategorised, apiKeySet }: Report) {
+function suggestRules(report: Report) {
+  const { uncategorised, apiKeySet } = report;
   const section = el("div", { class: "suggest-rules" });
   section.append(
     el("h3", {}, "Suggest rules"),
-    el("div", { class: "muted" }, "Claude can suggest Categorisation Rules for these descriptions. Only this list would leave your Mac: each description once, with every run of 4 or more digits masked as ####, and whether money came in or went out. Untick any you'd rather not send."),
+    el("div", { class: "muted" }, "Claude can suggest Categorisation Rules for these descriptions. Only this list and your Category and Subcategory names leave your Mac, and only when you press Suggest rules: each description once, with every run of 4 or more digits masked as ####, and whether money came in or went out. Untick any you'd rather not send."),
   );
+  const sendable = aboutToSend(uncategorised);
   const unticked = new Set<SentDescription>();
   const table = el("table");
   table.append(headerRow([["Send"], ["Description"], ["Direction"]]));
-  for (const sent of suggestionRequest({ uncategorised, unticked: [] }).descriptions) {
+  for (const sent of sendable) {
     const tick = el("input", { type: "checkbox", checked: "", "aria-label": `Send ${sent.description}` });
     tick.addEventListener("change", () => (tick.checked ? unticked.delete(sent) : unticked.add(sent)));
     const tickCell = el("td");
@@ -528,17 +534,104 @@ function suggestRules({ uncategorised, apiKeySet }: Report) {
     table.append(row);
   }
   const button = el("button", { type: "button" }, "Suggest rules");
-  const sent = el("div", { class: "sent muted", "aria-live": "polite" });
-  button.addEventListener("click", () => {
-    const { descriptions } = suggestionRequest({ uncategorised, unticked: [...unticked] });
-    sent.textContent = `Would send ${descriptions.length} description${descriptions.length === 1 ? "" : "s"}, but asking Claude isn't built yet, so nothing was sent.`;
+  const status = el("div", { class: "sent muted", "aria-live": "polite" });
+  const error = el("div", { class: "error", role: "alert", hidden: "" });
+  const list = el("div", { class: "suggested" });
+  const showSuggested = () => list.replaceChildren(suggestedList(report, showSuggested));
+  button.addEventListener("click", async () => {
+    const ticked = sendable.filter((sent) => !unticked.has(sent));
+    button.disabled = true;
+    error.hidden = true;
+    status.textContent = `Asking Claude about ${ticked.length} description${ticked.length === 1 ? "" : "s"}…`;
+    const response = await post<SuggestResponse>("/suggestions", { ticked }, "The tracker isn't responding, so nothing was suggested. Is it still running?");
+    button.disabled = false;
+    if ("error" in response) {
+      status.textContent = "";
+      error.textContent = response.error;
+      error.hidden = false;
+      return;
+    }
+    suggested = response.suggestions;
+    status.textContent = suggested.length === 0 ? "Claude has no Suggested Rules for these descriptions." : "Approve or reject each Suggested Rule. Nothing is saved until you approve it.";
+    showSuggested();
   });
-  section.append(scrolling(table), button, sent);
+  showSuggested();
+  section.append(scrolling(table), button, status, error, list);
   if (!apiKeySet) {
     button.disabled = true;
     section.append(el("div", { class: "no-key muted" }, "To ask Claude, set ANTHROPIC_API_KEY in the shell that runs npm start, then start the tracker again. Everything else works without it."));
   }
   return section;
+}
+
+/** Where a rule sorts what it catches, as a rule form's "Sort into" list labels it. */
+const sortInto = (rule: SuggestedRule) => ("transfer" in rule ? "Transfer" : `${rule.category} › ${rule.subcategory}`);
+
+/**
+ * The Suggested Rules, each with what it would catch now, to approve, edit in the rule form and then approve, or
+ * reject. Approving saves it like a hand-made rule and shows the Report again; rejecting discards it, then `changed`.
+ */
+function suggestedList({ uncategorised, categories }: Report, changed: () => void) {
+  const section = el("div");
+  if (suggested.length === 0) return section;
+  const rulePanel = el("div");
+  const error = el("div", { class: "error", role: "alert", hidden: "" });
+  const table = el("table");
+  table.append(headerRow([["Description contains"], ["Sort into"], ["Catches"], [""]]));
+  for (const rule of suggested) {
+    const discard = () => (suggested = suggested.filter((r) => r !== rule));
+    const approve = el("button", { type: "button" }, "Approve");
+    approve.addEventListener("click", async () => {
+      approve.disabled = true;
+      const response = await saveRule(rule);
+      if ("error" in response) {
+        approve.disabled = false;
+        error.textContent = response.error;
+        error.hidden = false;
+        return;
+      }
+      discard();
+      await render();
+    });
+    const edit = el("button", { type: "button" }, "Edit");
+    edit.addEventListener("click", () => {
+      const direction = uncategorised.find(({ description }) => ruleMatches(rule.contains, description))?.direction ?? "Out";
+      rulePanel.replaceChildren(
+        ruleForm(rule.contains, direction, uncategorised, categories, () => rulePanel.replaceChildren(), { sortInto: sortInto(rule), saved: discard }),
+      );
+      contains(rulePanel).focus();
+    });
+    const reject = el("button", { type: "button" }, "Reject");
+    reject.addEventListener("click", () => {
+      discard();
+      changed();
+    });
+    const actions = el("td", { class: "buttons" });
+    actions.append(approve, edit, reject);
+    const row = el("tr");
+    row.append(el("td", {}, rule.contains), el("td", {}, sortInto(rule)), el("td", { class: "preview" }, previewText(rule.contains, uncategorised)), actions);
+    table.append(row);
+  }
+  section.append(el("h3", {}, "Suggested Rules"), scrolling(table), error, rulePanel);
+  return section;
+}
+
+/** Saves one rule, with any new Category or Subcategory, to the end of the rules file, or says why not. */
+const saveRule = (rule: RuleToSave) => post<SaveResponse>("/rules", rule, "The tracker isn't responding, so the rule wasn't saved. Is it still running?");
+
+/** POSTs `body` to the tracker as JSON, giving its response, or `unanswered` as the error when it doesn't answer. */
+function post<Response>(url: string, body: unknown, unanswered: string): Promise<Response | { error: string }> {
+  return fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    .then((r) => r.json() as Promise<Response>)
+    .catch(() => ({ error: unanswered }));
+}
+
+/** How many Uncategorised descriptions "contains" text would catch, and their total. */
+function previewText(text: string, uncategorised: Report["uncategorised"]) {
+  const { descriptionCount, spending, earnings } = previewRule(text, uncategorised);
+  if (descriptionCount === 0) return "Catches no Uncategorised descriptions.";
+  const totals = [...(spending ? [`${gbp(spending)} Spending`] : []), ...(earnings ? [`${gbp(earnings)} Earnings`] : [])];
+  return `Catches ${descriptionCount} Uncategorised description${descriptionCount === 1 ? "" : "s"}: ${totals.join(", ") || gbp(0)}.`;
 }
 
 const contains = (node: HTMLElement) => node.querySelector<HTMLInputElement>('input[name="contains"]')!;
@@ -607,9 +700,17 @@ function newNameFields(direction: Direction, categories: Category[]) {
 /**
  * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
  * Transfer, or a new name from `newNameFields`. While the text is edited it shows what the rule would catch. Saving
- * adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again.
+ * adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again. Given a Suggested
+ * Rule to `edit`, it starts with the Suggested Rule's choice, and saving approves it.
  */
-function ruleForm(description: string, direction: Direction, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
+function ruleForm(
+  description: string,
+  direction: Direction,
+  uncategorised: Report["uncategorised"],
+  categories: Category[],
+  close: () => void,
+  edit?: { sortInto: string; saved: () => void },
+) {
   const newName = newNameFields(direction, categories);
   const choices: Then[] = [
     ...categories.flatMap(({ name, subcategories }) =>
@@ -623,16 +724,10 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
   const then = el("select", { name: "then" });
   then.append(el("option", { value: "", disabled: "", selected: "" }, "Choose where to sort it"));
   choices.forEach(({ label }, i) => then.append(el("option", { value: i }, label)));
+  const suggestedChoice = choices.findIndex(({ label }) => label === edit?.sortInto);
+  if (suggestedChoice >= 0) then.value = String(suggestedChoice);
   const preview = el("div", { class: "preview muted", "aria-live": "polite" });
-  const showPreview = () => {
-    const { descriptionCount, spending, earnings } = previewRule(text.value, uncategorised);
-    if (descriptionCount === 0) {
-      preview.textContent = "Catches no Uncategorised descriptions.";
-      return;
-    }
-    const totals = [...(spending ? [`${gbp(spending)} Spending`] : []), ...(earnings ? [`${gbp(earnings)} Earnings`] : [])];
-    preview.textContent = `Catches ${descriptionCount} Uncategorised description${descriptionCount === 1 ? "" : "s"}: ${totals.join(", ") || gbp(0)}.`;
-  };
+  const showPreview = () => (preview.textContent = previewText(text.value, uncategorised));
   text.addEventListener("input", showPreview);
   showPreview();
   const adding = () => choices[Number(then.value)]?.adds;
@@ -643,7 +738,7 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
     error.textContent = message;
     error.hidden = false;
   };
-  const save = el("button", { type: "submit" }, "Save rule");
+  const save = el("button", { type: "submit" }, edit ? "Approve rule" : "Save rule");
   const cancel = el("button", { type: "button" }, "Cancel");
   cancel.addEventListener("click", close);
   form.addEventListener("submit", async (event) => {
@@ -654,23 +749,18 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
     const missing = newName.missing(adding());
     if (missing) return fail(missing);
     save.disabled = true;
-    const response: SaveResponse = await fetch("/rules", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(chosen.rule(text.value)),
-    })
-      .then((r) => r.json() as Promise<SaveResponse>)
-      .catch(() => ({ error: "The tracker isn't responding, so the rule wasn't saved. Is it still running?" }));
+    const response = await saveRule(chosen.rule(text.value));
     if ("error" in response) {
       save.disabled = false;
       return fail(response.error);
     }
+    edit?.saved();
     await render();
   });
   const buttons = el("div", { class: "buttons" });
   buttons.append(save, cancel);
   form.append(
-    el("h3", {}, "Make a rule"),
+    el("h3", {}, edit ? "Edit a Suggested Rule" : "Make a rule"),
     labelled("Description contains", text),
     labelled("Sort into", then),
     ...newName.fields,

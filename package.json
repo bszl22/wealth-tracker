@@ -13,6 +13,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.132.1",
     "pdfjs-dist": "^4.10.38"
   },
   "devDependencies": {

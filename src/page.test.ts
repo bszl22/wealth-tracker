@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { madeUpTracker } from "./tools/madeUpReport.js";
+import type { SuggestionRequest } from "./suggestions.js";
+import { madeUpClaude, madeUpTracker } from "./tools/madeUpReport.js";
 
 // Renders the page from the made-up Report, so every figure here is invented.
 
@@ -23,6 +24,13 @@ async function showPage(options?: Parameters<typeof madeUpTracker>[0]) {
     if (url === "/rules") {
       const body = await tracker.saveRule(JSON.parse(init!.body as string)).then(
         () => ({ saved: true }),
+        (error: Error) => ({ error: error.message }),
+      );
+      return { json: async () => body };
+    }
+    if (url === "/suggestions") {
+      const body = await tracker.suggestRules(JSON.parse(init!.body as string).ticked).then(
+        (suggestions) => ({ suggestions }),
         (error: Error) => ({ error: error.message }),
       );
       return { json: async () => body };
@@ -232,12 +240,119 @@ describe("the about-to-send list for Suggested Rules", () => {
     expect(tickboxes().map((box) => box.checked)).toEqual([true, true, true]);
   });
 
-  it("sends nothing when Suggest rules is pressed, and says how many ticked rows would go", () => {
-    expect(suggestButton().disabled).toBe(false);
-    tickboxes()[1]!.click();
+});
+
+describe("asking Claude for Suggested Rules", () => {
+  /** Every request the made-up Claude was sent. */
+  const asked: SuggestionRequest[] = [];
+  const recordingClaude = async (request: SuggestionRequest) => {
+    asked.push(request);
+    return madeUpClaude(request);
+  };
+  const tickboxes = () => [...suggest().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  const suggestedRows = () => rows(suggest().querySelector(".suggested table")!).slice(1).map((row) => row.slice(0, 3));
+  const suggestedButton = (contains: string, label: string) => {
+    const row = [...suggest().querySelectorAll(".suggested tr")].find((r) => r.querySelector("td")?.textContent === contains)!;
+    return [...row.querySelectorAll("button")].find((b) => b.textContent === label)!;
+  };
+  const askClaude = async () => {
     suggestButton().click();
-    expect(suggest().querySelector(".sent")!.textContent).toBe("Would send 2 descriptions, but asking Claude isn't built yet, so nothing was sent.");
-    expect(fetched).toEqual(["/report"]);
+    await vi.waitFor(() => expect(suggest().querySelector(".suggested table")).not.toBeNull());
+  };
+  const uncategorisedDescriptions = () => [...document.querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent);
+
+  beforeAll(async () => {
+    asked.length = 0;
+    await showPage({ claude: recordingClaude });
+  });
+
+  it("sends nothing until Suggest rules is pressed, then asks once with only the ticked rows, masked, and the Categories", async () => {
+    expect(asked).toEqual([]);
+    tickboxes()[2]!.click();
+    await askClaude();
+    expect(fetched.filter((url) => url === "/suggestions")).toHaveLength(1);
+    expect(asked).toEqual([
+      {
+        descriptions: [
+          { description: "MYSTERY MERCHANT LTD", direction: "Out" },
+          { description: "PAYMENT FROM A FRIEND", direction: "In" },
+        ],
+        categories: [
+          { name: "Home", kind: "Spending", subcategories: ["Rent", "Energy"] },
+          { name: "Food", kind: "Spending", subcategories: ["Groceries", "Eating Out"] },
+          { name: "Fun", kind: "Spending", subcategories: ["Streaming", "Holidays"] },
+          { name: "Work", kind: "Earnings", subcategories: ["Salary"] },
+          { name: "Savings", kind: "Earnings", subcategories: ["Interest"] },
+        ],
+      },
+    ]);
+  });
+
+  it("shows Suggested Rules using existing Subcategories or Transfer, each with how many Uncategorised descriptions it catches and their total", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    // The made-up response also names a Category not in the rules file, and has masked "contains" text: neither is shown.
+    expect(suggestedRows()).toEqual([
+      ["MYSTERY MERCHANT", "Fun › Holidays", "Catches 1 Uncategorised description: £196.00 Spending."],
+      ["FRIEND", "Transfer", "Catches 1 Uncategorised description: £45.00 Earnings."],
+    ]);
+    expect(suggest().textContent).not.toMatch(/approve all/i);
+  });
+
+  it("discards a rejected Suggested Rule, saving and asking nothing", () => {
+    const before = fetched.length;
+    suggestedButton("FRIEND", "Reject").click();
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["MYSTERY MERCHANT"]);
+    expect(fetched.length).toBe(before);
+  });
+
+  it("saves an approved Suggested Rule like a hand-made one, then fetches the Report again", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    suggestedButton("MYSTERY MERCHANT", "Approve").click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
+    expect(fetched.slice(-2)).toEqual(["/rules", "/report"]);
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["FRIEND"]);
+  });
+
+  it("opens a Suggested Rule in the rule form to edit it before approving it", async () => {
+    suggestedButton("FRIEND", "Edit").click();
+    const form = suggest().querySelector<HTMLFormElement>("form.rule")!;
+    const contains = form.querySelector<HTMLInputElement>('input[name="contains"]')!;
+    const then = form.querySelector<HTMLSelectElement>('select[name="then"]')!;
+    expect(contains.value).toBe("FRIEND");
+    expect(then.selectedOptions[0]!.textContent).toBe("Transfer");
+    then.value = [...then.options].find((option) => option.textContent === "Work › Salary")!.value;
+    contains.value = "PAYMENT FROM";
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["CITY PARKING 20417", "CITY PARKING 20988"]));
+    const [, earnings] = document.querySelectorAll("table.months");
+    expect(rows(earnings!).find(([label]) => label === "Salary")![3]).toBe("£3,145.00");
+    expect(suggest().querySelector(".suggested table")).toBeNull();
+  });
+
+  it("shows a clear error and changes nothing when asking Claude fails", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    const failing = async () => {
+      throw new Error("Claude couldn't be reached, so nothing was suggested. Check your internet connection and try again.");
+    };
+    await showPage({ claude: failing });
+    suggestButton().click();
+    await vi.waitFor(() =>
+      expect(suggest().querySelector(".error")!.textContent).toBe("Claude couldn't be reached, so nothing was suggested. Check your internet connection and try again."),
+    );
+    expect(suggest().querySelector(".suggested table")).toBeNull();
+    expect(fetched).toEqual(["/report", "/suggestions"]);
+  });
+
+  it("shows a clear error when Claude's response can't be read", async () => {
+    await showPage({ claude: async () => "Sorry, here are some ideas" });
+    suggestButton().click();
+    await vi.waitFor(() =>
+      expect(suggest().querySelector(".error")!.textContent).toBe("Claude's response couldn't be read as Suggested Rules, so nothing was suggested. Try again."),
+    );
+    expect(suggest().querySelector(".suggested table")).toBeNull();
   });
 });
 

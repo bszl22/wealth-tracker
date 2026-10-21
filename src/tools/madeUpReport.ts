@@ -5,6 +5,7 @@ import { reconcileStatements, type StatementRead } from "../scanStatements.js";
 import type { Tracker } from "../server.js";
 import type { Transaction } from "../spending.js";
 import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from "../statements.js";
+import { askForSuggestedRules, type AskClaude } from "../suggestions.js";
 
 // A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
@@ -155,17 +156,37 @@ function madeUpReportWith({ categories, rules, found, apiKeySet }: Rules & { fou
 export const madeUpReport: Report = madeUpReportWith({ categories, rules, found: true, apiKeySet: true });
 
 /**
+ * Made-up responses from Claude, one per suggestion, given only for a sent description containing its "contains" text:
+ * one using an existing Subcategory, one marking a Transfer, one naming a Category that isn't in the rules file, and
+ * one with masked text, which matches no real description, so only the first two are offered.
+ */
+const MADE_UP_SUGGESTIONS = [
+  { contains: "MYSTERY MERCHANT", transfer: false, category: "Fun", subcategory: "Holidays" },
+  { contains: "FRIEND", transfer: true, category: "", subcategory: "" },
+  { contains: "CITY PARKING", transfer: false, category: "Transport", subcategory: "Parking" },
+  { contains: "PARKING ####", transfer: false, category: "Fun", subcategory: "Holidays" },
+];
+
+export const madeUpClaude: AskClaude = async ({ descriptions }) =>
+  JSON.stringify({
+    suggestions: MADE_UP_SUGGESTIONS.filter(({ contains }) => descriptions.some(({ description }) => description.toLowerCase().includes(contains.toLowerCase()))),
+  });
+
+/**
  * The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. The
  * rules file starts with the made-up Categories and rules unless told there is none yet, and saving a rule then creates
- * it. It says an API key is set unless told otherwise, though none is ever read or used.
+ * it. It says an API key is set unless told otherwise, though none is ever read or used: Suggested Rules come from
+ * `madeUpClaude`, or the `claude` given, and never from the API.
  */
-export function madeUpTracker({ apiKeySet = true, rulesFile = true }: { apiKeySet?: boolean; rulesFile?: boolean } = {}): Tracker {
+export function madeUpTracker({ apiKeySet = true, rulesFile = true, claude = madeUpClaude }: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude } = {}): Tracker {
   let contents = rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined;
+  const report = async () => madeUpReportWith({ ...readRules(contents), found: contents !== undefined, apiKeySet });
   return {
-    report: async () => madeUpReportWith({ ...readRules(contents), found: contents !== undefined, apiKeySet }),
+    report,
     saveRule: async (rule) => {
       contents = withRule(contents, rule);
     },
+    suggestRules: async (ticked) => askForSuggestedRules(await report(), ticked, claude),
   };
 }
 
