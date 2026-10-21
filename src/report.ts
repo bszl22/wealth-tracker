@@ -4,6 +4,7 @@ import { scanStatements, type ReconciledStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
 import { calculateSpending, type SpendingMonth, type UncategorisedDescription } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
+import { findSubscriptions, type Subscriptions } from "./subscriptions.js";
 
 export type YearMonth = { year: number; month: number };
 
@@ -33,13 +34,14 @@ export type NetWorthChange = { since: IsoDate; change: Pence; net: Pence; otherC
 
 /**
  * Everything the page shows: each month from Tracking Start through today, each Account's latest Balance, the
- * Uncategorised Transactions, the rules file's Categories to make rules with, and whether Suggested Rules can be asked
- * for.
+ * Uncategorised Transactions, the Subscriptions, the rules file's Categories to make rules with, and whether Suggested
+ * Rules can be asked for.
  */
 export type Report = {
   months: ReportMonth[];
   accounts: AccountBalance[];
   uncategorised: UncategorisedDescription[];
+  subscriptions: Subscriptions;
   categories: Category[];
   rulesFile: ReportInput["rulesFile"];
   apiKeySet: boolean;
@@ -65,7 +67,8 @@ export function buildReport({ statements: { balances, transactions }, categories
     const before = snapshots[i - 1];
     return { ...month, snapshot, netWorthChange: before && netWorthChange(before, snapshot, month.net) };
   });
-  return { months, accounts, uncategorised: spending.uncategorised, categories, rulesFile, apiKeySet };
+  const subscriptions = findSubscriptions({ transactions, categories, rules, today });
+  return { months, accounts, uncategorised: spending.uncategorised, subscriptions, categories, rulesFile, apiKeySet };
 }
 
 function netWorthChange(before: MonthEndSnapshot, after: MonthEndSnapshot, net: Pence): NetWorthChange {

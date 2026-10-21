@@ -145,7 +145,8 @@ function rankedUncategorised(matched: Matched[]): UncategorisedDescription[] {
   return [...groups.values()].sort((a, b) => b.pence - a.pence);
 }
 
-function firstMatch(rules: CategorisationRule[], { description }: Transaction): CategorisationRule | undefined {
+/** The first Categorisation Rule in the list matching a Transaction's description, which is the one that wins. */
+export function firstMatch(rules: CategorisationRule[], { description }: Transaction): CategorisationRule | undefined {
   return rules.find((rule) => ruleMatches(rule.contains, description));
 }
 

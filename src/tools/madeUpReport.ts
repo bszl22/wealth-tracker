@@ -9,8 +9,8 @@ import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from ".
 // A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
 // July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, Uncategorised
-// descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, and a
-// Stale Account.
+// descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, a
+// Stale Account, and current and lapsed weekly, monthly and yearly Subscriptions.
 
 const TODAY: IsoDate = "2026-07-12";
 const FULL_MONTHS = [1, 2, 3, 4, 5, 6];
@@ -29,6 +29,9 @@ const rules: CategorisationRule[] = [
   { contains: "SUPERMARKET", category: "Food", subcategory: "Groceries" },
   { contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" },
   { contains: "STREAMFLIX", category: "Fun", subcategory: "Streaming" },
+  { contains: "MUSICBOX", category: "Fun", subcategory: "Streaming" },
+  { contains: "PHOTO CLOUD", category: "Fun", subcategory: "Streaming" },
+  { contains: "VEG BOX", category: "Food", subcategory: "Groceries" },
   { contains: "SKY AIRLINES", category: "Fun", subcategory: "Holidays" },
   { contains: "EMPLOYER", category: "Work", subcategory: "Salary" },
   { contains: "INTEREST", category: "Savings", subcategory: "Interest" },
@@ -60,6 +63,11 @@ for (const month of FULL_MONTHS) {
   for (const d of month === 4 ? [6, 9, 13, 17, 21, 27] : [8, 22]) add(CARD, day(month, d), "CORNER CAFE", 2400 + (d % 5) * 300, "Out");
   add(CARD, day(month, 15), "STREAMFLIX.COM", 1099, "Out");
 }
+// Subscriptions: a weekly veg box and a monthly music service, both lapsed, and a yearly photo service, current.
+for (let d = 5; d <= 54; d += 7) add(CARD, d <= 31 ? day(1, d) : day(2, d - 31), "VEG BOX DELIVERY", 1850, "Out");
+for (const month of [1, 2, 3]) add(CURRENT, day(month, 20), "MUSICBOX SUBSCRIPTION", 999, "Out");
+add(CARD, "2025-07-08", "PHOTO CLOUD ANNUAL", 5999, "Out");
+add(CARD, day(7, 8), "PHOTO CLOUD ANNUAL", 5999, "Out");
 // The card bill for each month is paid from the current account early the next month.
 for (const month of FULL_MONTHS) {
   const owed = transactions
@@ -79,14 +87,14 @@ add(CURRENT, day(7, 1), "DD LANDLORD RENT", 125000, "Out");
 add(CARD, day(7, 4), "SUPERMARKET 0412", 6100, "Out");
 add(CARD, day(7, 8), "CORNER CAFE", 2700, "Out");
 
-/** A Running Balance after each Transaction, from the opening Balance at the end of 2025. */
+/** A Running Balance after each Transaction, from the opening Balance at the end of 2025, which already holds any earlier one. */
 function runningBalances(account: MadeUpAccount): Balance[] {
   const statement = "Made-up Statements/opening.pdf";
   const opening: Balance = { statement, account: account.name, kind: account.kind, date: "2025-12-31", pence: account.opening, source: "Closing" };
   let pence = account.opening;
   const adds: Direction = account.kind === "Asset" ? "In" : "Out";
   const running = transactions
-    .filter((t) => t.account === account.name)
+    .filter((t) => t.account === account.name && t.date > opening.date)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(({ statement, date, pence: moved, direction }): Balance => {
       pence += direction === adds ? moved : -moved;

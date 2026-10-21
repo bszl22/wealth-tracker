@@ -5,6 +5,7 @@ import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
 import type { SaveResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
+import type { Subscriptions } from "./subscriptions.js";
 import { suggestionRequest, type SentDescription } from "./suggestions.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
@@ -618,6 +619,42 @@ function ruleForm(description: string, uncategorised: Report["uncategorised"], c
   return form;
 }
 
+/**
+ * The Subscriptions: current ones then lapsed, each largest yearly cost first, each yearly cost listing its Transactions
+ * when clicked, and the total yearly cost of the current ones.
+ */
+function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscriptions) {
+  const section = el("div", { class: "subscriptions" });
+  section.append(el("h2", {}, "Subscriptions"));
+  if (subscriptions.length === 0) {
+    section.append(el("div", { class: "muted" }, "No Spending repeats weekly, monthly or yearly for about the same amount yet."));
+    return section;
+  }
+  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly for about the same amount, found from your Transactions, which keep their own Categories. Current means it charged within its interval plus 7 days. Click a yearly cost to see its Transactions."));
+  const panel = el("div", { class: "transactions-panel" });
+  const table = el("table");
+  table.append(headerRow([["Subscription"], ["Interval"], ["Usual amount", "balance"], ["Last charge"], ["Status"], ["Yearly cost", "balance"]]));
+  for (const { name, usual, interval, lastCharge, current, yearlyCost, transactions } of subscriptions) {
+    const cost = el("td", { class: "balance" });
+    cost.append(figureButton(gbp(yearlyCost), `${name}, yearly cost: ${gbp(yearlyCost)}`, transactions, "Out", panel));
+    const row = el("tr");
+    row.append(
+      el("td", { class: "description" }, name),
+      el("td", {}, interval),
+      el("td", { class: "balance" }, gbp(usual)),
+      el("td", {}, dayLabel(lastCharge)),
+      el("td", {}, current ? "Current" : "Lapsed"),
+      cost,
+    );
+    table.append(row);
+  }
+  const total = el("tr", { class: "total" });
+  total.append(el("td", {}, "Total yearly cost of current Subscriptions"), ...Array.from({ length: 4 }, () => el("td")), el("td", { class: "balance" }, gbp(currentYearlyCost)));
+  table.append(total);
+  section.append(scrolling(table), panel);
+  return section;
+}
+
 function spendingSection(report: Report) {
   const { months, rulesFile } = report;
   const section = el("div");
@@ -673,6 +710,7 @@ async function render() {
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),
     spendingSection(report),
+    subscriptionsSection(report.subscriptions),
   );
 }
 render();
