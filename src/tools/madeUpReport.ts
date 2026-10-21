@@ -1,13 +1,13 @@
 import type { Balance } from "../netWorth.js";
-import { readRules, withRule, type Category, type CategorisationRule, type Rules } from "../rules.js";
-import { buildReport, type Report } from "../report.js";
-import { reconcileStatements, type StatementRead } from "../scanStatements.js";
-import type { Tracker } from "../server.js";
+import type { Category, CategorisationRule } from "../rules.js";
+import { rulesFileHolding } from "../rulesFile.js";
+import type { StatementRead } from "../scanStatements.js";
 import type { Transaction } from "../spending.js";
 import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from "../statements.js";
-import { askForSuggestedRules, type AskClaude } from "../suggestions.js";
+import type { AskClaude } from "../suggestions.js";
+import { createTracker, type Tracker } from "../tracker.js";
 
-// A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
+// A made-up tracker, for checking the page without the real Statements: served by serveMadeUpReport.ts and
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
 // July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, Uncategorised
 // descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, a
@@ -140,21 +140,6 @@ function madeUpReads(): StatementRead[] {
   return [...files].map(([file, accounts]) => ({ file, accounts: [...accounts.values()] }));
 }
 
-/** The made-up Report with the given Categories and rules, from a rules file that was or wasn't found. */
-function madeUpReportWith({ categories, rules, found, apiKeySet }: Rules & { found: boolean; apiKeySet: boolean }): Report {
-  return buildReport({
-    statements: reconcileStatements(madeUpReads()),
-    categories,
-    rules,
-    rulesFile: { path: "Made-up Statements/rules.json", found },
-    trackingStart: { year: 2026, month: 1 },
-    today: TODAY,
-    apiKeySet,
-  });
-}
-
-export const madeUpReport: Report = madeUpReportWith({ categories, rules, found: true, apiKeySet: true });
-
 /**
  * Made-up responses from Claude, one per suggestion, given only for a sent description containing its "contains" text:
  * one using an existing Subcategory, one marking a Transfer, one naming a new Category, and one with masked text, which
@@ -173,20 +158,18 @@ export const madeUpClaude: AskClaude = async ({ descriptions }) =>
   });
 
 /**
- * The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. The
- * rules file starts with the made-up Categories and rules unless told there is none yet, and saving a rule then creates
- * it. It says an API key is set unless told otherwise, though none is ever read or used: Suggested Rules come from
- * `madeUpClaude`, or the `claude` given, and never from the API.
+ * The tracker with the made-up Statements, saving rules into a made-up rules file held in memory, so the data folder is
+ * never touched. The rules file starts with the made-up Categories and rules unless told there is none yet, and saving
+ * a rule then creates it. It says an API key is set unless told otherwise, though none is ever read or used: Suggested
+ * Rules come from `madeUpClaude`, or the `claude` given, and never from the API. Told no key is set, it has no Claude to
+ * ask, so asking for Suggested Rules fails as it does in the tracker.
  */
 export function madeUpTracker({ apiKeySet = true, rulesFile = true, claude = madeUpClaude }: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude } = {}): Tracker {
-  let contents = rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined;
-  const report = async () => madeUpReportWith({ ...readRules(contents), found: contents !== undefined, apiKeySet });
-  return {
-    report,
-    saveRule: async (rule) => {
-      contents = withRule(contents, rule);
-    },
-    suggestRules: async (ticked) => askForSuggestedRules(await report(), ticked, claude),
-  };
+  return createTracker({
+    readStatements: async () => madeUpReads(),
+    rulesFile: rulesFileHolding(rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined, "Made-up Statements/rules.json"),
+    claude: apiKeySet ? claude : undefined,
+    trackingStart: { year: 2026, month: 1 },
+    today: () => TODAY,
+  });
 }
-

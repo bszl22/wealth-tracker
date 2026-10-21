@@ -1,8 +1,6 @@
 import { calculateNetWorth, type AccountBalance, type MonthEndSnapshot } from "./netWorth.js";
 import type { Category, CategorisationRule } from "./rules.js";
-import { loadRules } from "./rulesFile.js";
-import { scanStatements, type ReconciledStatements } from "./scanStatements.js";
-import type { Settings } from "./settings.js";
+import type { ReconciledStatements } from "./scanStatements.js";
 import { calculateSpending, type SpendingMonth, type UncategorisedDescription } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 import { findSubscriptions, type Subscriptions } from "./subscriptions.js";
@@ -17,7 +15,7 @@ export type ReportInput = {
   rulesFile: { path: string; found: boolean };
   trackingStart: YearMonth;
   today: IsoDate;
-  /** Whether `ANTHROPIC_API_KEY` is set, so Suggested Rules can be asked for. Never the key itself. */
+  /** Whether an API key is set, meaning the tracker was given Claude to ask for Suggested Rules. Never the key itself. */
   apiKeySet: boolean;
 };
 
@@ -50,13 +48,6 @@ export type Report = {
 
 /** What the page receives: the Report, or why it can't be shown. */
 export type ReportResponse = Report | { error: string };
-
-/** The Report from the Statements and rules file in the data folder, as of today. */
-export async function statementsReport(settings: Settings): Promise<Report> {
-  const statements = await scanStatements(settings.dataFolder);
-  const { categories, rules, path, found } = await loadRules(settings.dataFolder);
-  return buildReport({ statements, categories, rules, rulesFile: { path, found }, trackingStart: settings.trackingStart, today: localToday(), apiKeySet: Boolean(process.env.ANTHROPIC_API_KEY) });
-}
 
 export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today, apiKeySet }: ReportInput): Report {
   const monthEnds = monthEndsFrom(trackingStart, today);

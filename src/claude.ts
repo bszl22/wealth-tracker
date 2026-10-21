@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { SUGGESTED_RULES_SCHEMA, type SuggestionRequest } from "./suggestions.js";
+import { SUGGESTED_RULES_SCHEMA, type AskClaude } from "./suggestions.js";
 
 // The one place the tracker talks to Claude (ADR 0003). Kept thin and untested: suggestions.ts builds what is sent and
 // reads what comes back. Its errors never quote descriptions, suggestions or the API key.
@@ -16,26 +16,26 @@ A Categorisation Rule matches every description containing its "contains" text, 
 
 Suggest a rule only when you are fairly sure of it.`;
 
-/** Asks Claude for Suggested Rules with exactly `request`, giving the text of its response. The API key comes only from `ANTHROPIC_API_KEY`. */
-export async function askClaude(request: SuggestionRequest): Promise<string> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY isn't set, so Claude can't be asked. Set it in the shell that runs npm start, then start the tracker again.");
-  const client = new Anthropic({ apiKey });
-  let message: Anthropic.Beta.BetaMessage;
-  try {
-    message = await client.beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      system: INSTRUCTIONS,
-      messages: [{ role: "user", content: JSON.stringify(request) }],
-      output_config: { format: { type: "json_schema", schema: SUGGESTED_RULES_SCHEMA } },
-    });
-  } catch (error) {
-    throw new Error(failureMessage(error));
-  }
-  if (message.stop_reason === "refusal") throw new Error("Claude declined to suggest rules for these descriptions. Untick some and try again.");
-  if (message.stop_reason === "max_tokens") throw new Error("Claude's response was cut short, so nothing was suggested. Untick some descriptions and try again.");
-  return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+/** Asks Claude, with `apiKey`, for Suggested Rules with exactly the request, giving the text of its response. */
+export function claudeWith(apiKey: string): AskClaude {
+  return async (request) => {
+    const client = new Anthropic({ apiKey });
+    let message: Anthropic.Beta.BetaMessage;
+    try {
+      message = await client.beta.messages.create({
+        model: MODEL,
+        max_tokens: 16000,
+        system: INSTRUCTIONS,
+        messages: [{ role: "user", content: JSON.stringify(request) }],
+        output_config: { format: { type: "json_schema", schema: SUGGESTED_RULES_SCHEMA } },
+      });
+    } catch (error) {
+      throw new Error(failureMessage(error));
+    }
+    if (message.stop_reason === "refusal") throw new Error("Claude declined to suggest rules for these descriptions. Untick some and try again.");
+    if (message.stop_reason === "max_tokens") throw new Error("Claude's response was cut short, so nothing was suggested. Untick some descriptions and try again.");
+    return message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+  };
 }
 
 /** Why asking Claude failed, from the kind of error alone, since an error's own message could quote the request. */

@@ -1,22 +1,26 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { askClaude } from "./claude.js";
-import { statementsReport } from "./report.js";
-import { saveRule } from "./rulesFile.js";
+import { claudeWith } from "./claude.js";
+import { localToday } from "./report.js";
+import { rulesFileIn } from "./rulesFile.js";
+import { readStatements } from "./scanStatements.js";
 import { startServer } from "./server.js";
 import { loadSettings } from "./settings.js";
-import { askForSuggestedRules } from "./suggestions.js";
+import { createTracker } from "./tracker.js";
 
 const PORT = 4321;
 
 try {
-  const settings = await loadSettings(fileURLToPath(new URL("..", import.meta.url)));
+  const { dataFolder, trackingStart } = await loadSettings(fileURLToPath(new URL("..", import.meta.url)));
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   await startServer(
-    {
-      report: () => statementsReport(settings),
-      saveRule: (rule) => saveRule(settings.dataFolder, rule),
-      suggestRules: async (ticked) => askForSuggestedRules(await statementsReport(settings), ticked, askClaude),
-    },
+    createTracker({
+      readStatements: () => readStatements(dataFolder),
+      rulesFile: rulesFileIn(dataFolder),
+      claude: apiKey ? claudeWith(apiKey) : undefined,
+      trackingStart,
+      today: localToday,
+    }),
     PORT,
   );
   const url = `http://127.0.0.1:${PORT}/`;

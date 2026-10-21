@@ -74,11 +74,6 @@ async function readStatement(path: string, read: StatementReader): Promise<{ acc
   }
 }
 
-/** Every Balance and Transaction from every Statement, reconciled where Statements overlap, failing with every file that could not be read. */
-export async function scanStatements(dataFolder: string): Promise<ReconciledStatements> {
-  return reconcileStatements(await readStatements(dataFolder));
-}
-
 /**
  * Every Balance and Transaction from the files read, each tagged with its Account and Statement file, failing with every
  * file that could not be read. It gives one Balance per Account and date, failing when overlapping Statements disagree,

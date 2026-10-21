@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readStatements, reconcileStatements, scanStatements, type StatementRead } from "./scanStatements.js";
+import { readStatements, reconcileStatements, type StatementRead } from "./scanStatements.js";
 import type { StatementBalance, StatementTransaction } from "./statements.js";
 
 const KNOWN_FOLDERS = ["Amex Statements", "HSBC Statements", "Kroo", "Vanguard Statements"];
@@ -73,7 +73,7 @@ describe("readStatements", () => {
   it("stops with an error naming every unreadable file but never quoting it", async () => {
     await writeFile(join(dataFolder, "Kroo", "notes.txt"), MADE_UP_CONTENTS);
     await writeFile(join(dataFolder, "HSBC Statements", "2026-01.pdf"), MADE_UP_CONTENTS);
-    const error = await scanStatements(dataFolder).then(
+    const error = await readStatements(dataFolder).then(reconcileStatements).then(
       () => undefined,
       (e: Error) => e.message,
     );

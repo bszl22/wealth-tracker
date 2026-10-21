@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
-import type { Report, ReportResponse } from "./report.js";
-import { ruleToSave, type RuleToSave } from "./rules.js";
-import type { SentDescription, SuggestedRule } from "./suggestions.js";
+import type { ReportResponse } from "./report.js";
+import { ruleToSave } from "./rules.js";
+import type { SuggestedRule } from "./suggestions.js";
+import type { Tracker } from "./tracker.js";
 
 const PAGE = new URL("./page.html", import.meta.url);
 
@@ -12,16 +13,6 @@ const SCRIPTS: Record<string, URL> = {
   "/page.js": new URL("./page.ts", import.meta.url),
   "/rules.js": new URL("./rules.ts", import.meta.url),
   "/suggestions.js": new URL("./suggestions.ts", import.meta.url),
-};
-
-/**
- * What the page can ask of the tracker: the Report, saving one Categorisation Rule to the end of the rules file, and
- * Suggested Rules from Claude for the ticked rows of the about-to-send list.
- */
-export type Tracker = {
-  report: () => Promise<Report>;
-  saveRule: (rule: RuleToSave) => Promise<void>;
-  suggestRules: (ticked: SentDescription[]) => Promise<SuggestedRule[]>;
 };
 
 /** What the page receives after saving a rule: that it was saved, or why not. */
