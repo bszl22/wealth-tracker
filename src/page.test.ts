@@ -2,9 +2,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { ruleToSave } from "./rules.js";
+import { handlerFor } from "./server.js";
 import type { SuggestionRequest } from "./suggestions.js";
 import { madeUpClaude, madeUpTracker } from "./tools/madeUpReport.js";
+import type { Tracker } from "./tracker.js";
 
 // Renders the page from the made-up Report, so every figure here is invented.
 
@@ -14,36 +15,29 @@ const rows = (table: Element) => [...(table as HTMLTableElement).rows].map((row)
 /** Every URL the page fetched, in order. */
 const fetched: string[] = [];
 
-/** Shows the page as the server does, with the made-up Report, saving rules into the made-up rules file in memory. */
-async function showPage(options?: Parameters<typeof madeUpTracker>[0]) {
+/** The port `npm run made-up` serves the page on. */
+const PORT = 4400;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+
+/**
+ * Shows the page as the server does, with the made-up Report, or the Tracker given, saving rules into the made-up rules
+ * file in memory. Every request goes through the server's own handler.
+ */
+async function showPage(options?: Parameters<typeof madeUpTracker>[0] | Tracker) {
   const page = readFileSync(join(import.meta.dirname, "page.html"), "utf8");
   document.body.innerHTML = /<main>[\s\S]*<\/main>/.exec(page)![0];
-  const tracker = madeUpTracker(options);
+  const handle = handlerFor(options && "report" in options ? options : madeUpTracker(options), PORT);
   fetched.length = 0;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     fetched.push(url);
-    if (url === "/rules") {
-      // As the server does, checking the rule before saving it.
-      const save = async () => tracker.saveRule(ruleToSave(JSON.parse(init!.body as string)));
-      const body = await save().then(
-        () => ({ saved: true }),
-        (error: Error) => ({ error: error.message }),
-      );
-      return { json: async () => body };
-    }
-    if (url === "/suggestions") {
-      const body = await tracker.suggestRules(JSON.parse(init!.body as string).ticked).then(
-        (suggestions) => ({ suggestions }),
-        (error: Error) => ({ error: error.message }),
-      );
-      return { json: async () => body };
-    }
-    const report = await tracker.report();
-    return { json: async () => report };
+    // The browser adds the Origin itself. happy-dom's Request drops one passed in, so it is set afterwards, as a browser would.
+    const request = new Request(ORIGIN + url, init);
+    request.headers.set("origin", ORIGIN);
+    return handle(request);
   });
   vi.resetModules();
   await import("./page.js");
-  await vi.waitFor(() => expect(document.querySelector(".latest")).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector(".latest, #content .error")).not.toBeNull());
 }
 
 beforeAll(() => showPage());
@@ -494,5 +488,16 @@ describe("making a rule with no rules file yet", () => {
     form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
     await vi.waitFor(() => expect(labels(document.querySelectorAll("table.months")[0]!)).toContain("Gifts"));
     expect(labels(document.querySelectorAll("table.months")[1]!)).not.toContain("Gifts");
+  });
+});
+
+describe("the page when the Report can't be built", () => {
+  beforeAll(() => showPage({ ...madeUpTracker(), report: () => Promise.reject(new Error("No Closing Balance found")) }));
+
+  it("shows why in place of the chart", () => {
+    const error = document.querySelector("#content .error")!;
+    expect(error.querySelector("h2")!.textContent).toBe("Net Worth can't be shown");
+    expect(error.textContent).toContain("No Closing Balance found");
+    expect(document.querySelector(".latest")).toBeNull();
   });
 });
