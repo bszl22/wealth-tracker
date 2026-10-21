@@ -139,29 +139,30 @@ function madeUpReads(): StatementRead[] {
   return [...files].map(([file, accounts]) => ({ file, accounts: [...accounts.values()] }));
 }
 
-/** The made-up Report with the given Categories and rules. */
-function madeUpReportWith({ categories, rules, apiKeySet }: Rules & { apiKeySet: boolean }): Report {
+/** The made-up Report with the given Categories and rules, from a rules file that was or wasn't found. */
+function madeUpReportWith({ categories, rules, found, apiKeySet }: Rules & { found: boolean; apiKeySet: boolean }): Report {
   return buildReport({
     statements: reconcileStatements(madeUpReads()),
     categories,
     rules,
-    rulesFile: { path: "Made-up Statements/rules.json", found: true },
+    rulesFile: { path: "Made-up Statements/rules.json", found },
     trackingStart: { year: 2026, month: 1 },
     today: TODAY,
     apiKeySet,
   });
 }
 
-export const madeUpReport: Report = madeUpReportWith({ categories, rules, apiKeySet: true });
+export const madeUpReport: Report = madeUpReportWith({ categories, rules, found: true, apiKeySet: true });
 
 /**
- * The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. It
- * says an API key is set unless told otherwise, though none is ever read or used.
+ * The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. The
+ * rules file starts with the made-up Categories and rules unless told there is none yet, and saving a rule then creates
+ * it. It says an API key is set unless told otherwise, though none is ever read or used.
  */
-export function madeUpTracker({ apiKeySet = true }: { apiKeySet?: boolean } = {}): Tracker {
-  let contents = JSON.stringify({ categories, rules }, null, 2) + "\n";
+export function madeUpTracker({ apiKeySet = true, rulesFile = true }: { apiKeySet?: boolean; rulesFile?: boolean } = {}): Tracker {
+  let contents = rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined;
   return {
-    report: async () => madeUpReportWith({ ...readRules(contents), apiKeySet }),
+    report: async () => madeUpReportWith({ ...readRules(contents), found: contents !== undefined, apiKeySet }),
     saveRule: async (rule) => {
       contents = withRule(contents, rule);
     },

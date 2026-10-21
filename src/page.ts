@@ -543,15 +543,23 @@ function suggestRules({ uncategorised, apiKeySet }: Report) {
 
 const contains = (node: HTMLElement) => node.querySelector<HTMLInputElement>('input[name="contains"]')!;
 
+/** One choice in a rule form's "Sort into" list: the rule it saves, and whether it adds a new Category or Subcategory. */
+type Then = { label: string; adds?: "Category" | "Subcategory"; rule: (contains: string) => RuleToSave };
+
+/** `field` inside a label reading `text`. */
+function labelled(text: string, field: HTMLElement) {
+  const node = el("label", {}, text);
+  node.append(field);
+  return node;
+}
+
 /**
- * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
- * Transfer, a new Subcategory of an existing Category, or a new Category with one Subcategory. A new Category's kind
- * starts as Spending for money out (`direction`) and Earnings for money in. While the text is edited it shows what the
- * rule would catch. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report
- * again.
+ * A rule form's fields for adding a name: the choices "New Subcategory…" of a chosen existing Category (offered only
+ * when there are Categories) and "New Category…" with its kind, starting as Spending for money out (`direction`) and
+ * Earnings for money in, and one Subcategory. Shows only the fields the chosen choice needs, and says which name is
+ * still missing before saving.
  */
-function ruleForm(description: string, direction: Direction, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
-  type Then = { label: string; adds?: "Category" | "Subcategory"; rule: (contains: string) => RuleToSave };
+function newNameFields(direction: Direction, categories: Category[]) {
   const parent = el("select", { name: "parent" });
   categories.forEach(({ name }) => parent.append(el("option", { value: name }, name)));
   const newCategory = el("input", { name: "category", type: "text", autocomplete: "off" });
@@ -559,12 +567,9 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
   (["Spending", "Earnings"] satisfies CategoryKind[]).forEach((k) => kind.append(el("option", { value: k }, k)));
   kind.value = direction === "Out" ? "Spending" : "Earnings";
   const newSubcategory = el("input", { name: "subcategory", type: "text", autocomplete: "off" });
+  const categoryName = () => newCategory.value.trim();
   const subcategoryName = () => newSubcategory.value.trim();
   const choices: Then[] = [
-    ...categories.flatMap(({ name, subcategories }) =>
-      subcategories.map((subcategory): Then => ({ label: `${name} › ${subcategory}`, rule: (contains) => ({ contains, category: name, subcategory }) })),
-    ),
-    { label: "Transfer", rule: (contains) => ({ contains, transfer: true }) },
     ...(categories.length > 0
       ? [
           {
@@ -577,13 +582,41 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
     {
       label: "New Category…",
       adds: "Category",
-      rule: (contains) => ({
-        contains,
-        category: newCategory.value.trim(),
-        subcategory: subcategoryName(),
-        adds: { new: "Category", kind: kind.value as CategoryKind },
-      }),
+      rule: (contains) => ({ contains, category: categoryName(), subcategory: subcategoryName(), adds: { new: "Category", kind: kind.value as CategoryKind } }),
     },
+  ];
+  const parentLabel = labelled("Category", parent);
+  const newCategoryLabels = [labelled("New Category", newCategory), labelled("Kind", kind)];
+  const newSubcategoryLabel = labelled("New Subcategory", newSubcategory);
+  return {
+    choices,
+    fields: [parentLabel, ...newCategoryLabels, newSubcategoryLabel],
+    show: (adding: Then["adds"]) => {
+      parentLabel.hidden = adding !== "Subcategory";
+      newCategoryLabels.forEach((node) => (node.hidden = adding !== "Category"));
+      newSubcategoryLabel.hidden = adding === undefined;
+    },
+    missing: (adding: Then["adds"]) => {
+      if (adding === "Category" && categoryName() === "") return "Give the new Category a name.";
+      if (adding && subcategoryName() === "") return "Give the new Subcategory a name.";
+      return undefined;
+    },
+  };
+}
+
+/**
+ * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
+ * Transfer, or a new name from `newNameFields`. While the text is edited it shows what the rule would catch. Saving
+ * adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again.
+ */
+function ruleForm(description: string, direction: Direction, uncategorised: Report["uncategorised"], categories: Category[], close: () => void) {
+  const newName = newNameFields(direction, categories);
+  const choices: Then[] = [
+    ...categories.flatMap(({ name, subcategories }) =>
+      subcategories.map((subcategory): Then => ({ label: `${name} › ${subcategory}`, rule: (contains) => ({ contains, category: name, subcategory }) })),
+    ),
+    { label: "Transfer", rule: (contains) => ({ contains, transfer: true }) },
+    ...newName.choices,
   ];
   const form = el("form", { class: "rule" });
   const text = el("input", { name: "contains", type: "text", value: description, autocomplete: "off" });
@@ -602,22 +635,9 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
   };
   text.addEventListener("input", showPreview);
   showPreview();
-  const label = (text: string, field: HTMLElement) => {
-    const node = el("label", {}, text);
-    node.append(field);
-    return node;
-  };
-  const parentLabel = label("Category", parent);
-  const newCategoryLabels = [label("New Category", newCategory), label("Kind", kind)];
-  const newSubcategoryLabel = label("New Subcategory", newSubcategory);
   const adding = () => choices[Number(then.value)]?.adds;
-  const showNewFields = () => {
-    parentLabel.hidden = adding() !== "Subcategory";
-    newCategoryLabels.forEach((node) => (node.hidden = adding() !== "Category"));
-    newSubcategoryLabel.hidden = adding() === undefined;
-  };
-  then.addEventListener("change", showNewFields);
-  showNewFields();
+  then.addEventListener("change", () => newName.show(adding()));
+  newName.show(undefined);
   const error = el("div", { class: "error", role: "alert", hidden: "" });
   const fail = (message: string) => {
     error.textContent = message;
@@ -631,8 +651,8 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
     const chosen = choices[Number(then.value)];
     if (then.value === "" || !chosen) return fail("Choose a Subcategory, Transfer, or a new Category or Subcategory.");
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
-    if (adding() === "Category" && newCategory.value.trim() === "") return fail("Give the new Category a name.");
-    if (adding() && subcategoryName() === "") return fail("Give the new Subcategory a name.");
+    const missing = newName.missing(adding());
+    if (missing) return fail(missing);
     save.disabled = true;
     const response: SaveResponse = await fetch("/rules", {
       method: "POST",
@@ -651,11 +671,9 @@ function ruleForm(description: string, direction: Direction, uncategorised: Repo
   buttons.append(save, cancel);
   form.append(
     el("h3", {}, "Make a rule"),
-    label("Description contains", text),
-    label("Sort into", then),
-    parentLabel,
-    ...newCategoryLabels,
-    newSubcategoryLabel,
+    labelled("Description contains", text),
+    labelled("Sort into", then),
+    ...newName.fields,
     preview,
     el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
     error,

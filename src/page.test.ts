@@ -251,3 +251,53 @@ describe("Suggest rules without an API key", () => {
     );
   });
 });
+
+describe("making a rule with no rules file yet", () => {
+  beforeAll(() => showPage({ rulesFile: false }));
+
+  const makeRule = (description: string) => {
+    const row = [...document.querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
+    [...row.querySelectorAll("button")].find((b) => b.textContent === "Make rule")!.click();
+    return document.querySelector<HTMLFormElement>("form.rule")!;
+  };
+  const field = <E extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) => form.querySelector<E>(`[name="${name}"]`)!;
+  const type = (input: HTMLInputElement, text: string) => {
+    input.value = text;
+    input.dispatchEvent(new Event("input"));
+  };
+  const chooseNewCategory = (form: HTMLFormElement) => {
+    const select = field<HTMLSelectElement>(form, "then");
+    select.value = [...select.options].find((option) => option.textContent === "New Category…")!.value;
+    select.dispatchEvent(new Event("change"));
+  };
+  const labels = (table: Element) => rows(table).map(([label]) => label);
+
+  it("offers only Transfer or a new Category, and saving one creates the rules file holding it and the rule", async () => {
+    expect(document.body.textContent).toContain("No rules file yet");
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    expect([...field<HTMLSelectElement>(form, "then").options].filter((option) => !option.disabled).map((option) => option.textContent)).toEqual([
+      "Transfer",
+      "New Category…",
+    ]);
+    chooseNewCategory(form);
+    type(field(form, "category"), "Shopping");
+    type(field(form, "subcategory"), "Online");
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("No rules file yet"));
+    const [spending] = document.querySelectorAll("table.months");
+    expect(labels(spending!)).toContain("Shopping");
+  });
+
+  it("saves a new Category as the kind chosen, not the one it started as", async () => {
+    const form = makeRule("PAYMENT FROM A FRIEND");
+    chooseNewCategory(form);
+    const kind = field<HTMLSelectElement>(form, "kind");
+    expect(kind.value).toBe("Earnings");
+    kind.value = "Spending";
+    type(field(form, "category"), "Gifts");
+    type(field(form, "subcategory"), "From Friends");
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(labels(document.querySelectorAll("table.months")[0]!)).toContain("Gifts"));
+    expect(labels(document.querySelectorAll("table.months")[1]!)).not.toContain("Gifts");
+  });
+});
