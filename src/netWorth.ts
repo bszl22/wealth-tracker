@@ -10,7 +10,7 @@ export type MonthEndSnapshot = { monthEnd: IsoDate; assets: Pence; liabilities: 
 export type AccountBalance = Omit<Balance, "source" | "statement"> & { stale: boolean };
 
 export type NetWorthInput = {
-  /** Every Balance from every Statement, each Statement's Balances in the order it lists them. */
+  /** Every Balance from every Statement, one per Account and date. */
   balances: Balance[];
   /** The last day of each month to give a Month-End Snapshot for, in order. */
   monthEnds: IsoDate[];
@@ -22,7 +22,6 @@ export function calculateNetWorth({ balances, monthEnds, today }: NetWorthInput)
   snapshots: MonthEndSnapshot[];
   accounts: AccountBalance[];
 } {
-  checkStatementsAgree(balances);
   const snapshots = monthEnds.map((monthEnd): MonthEndSnapshot => {
     const latest = [...latestBalancesOnOrBefore(balances, monthEnd).values()];
     const assets = sum(latest.filter((b) => b.kind === "Asset"));
@@ -37,26 +36,6 @@ export function calculateNetWorth({ balances, monthEnds, today }: NetWorthInput)
 }
 
 const KIND_ORDER: AccountKind[] = ["Asset", "Liability"];
-
-/**
- * Fails when two Statements give different Balances for the same Account and date. Within one
- * Statement, several Running Balances can share a date, so each Statement's last listed one counts.
- */
-function checkStatementsAgree(balances: Balance[]): void {
-  const perStatement = new Map<string, Balance>();
-  for (const balance of balances) perStatement.set(`${balance.statement}\n${balance.account}\n${balance.date}`, balance);
-  const firstListed = new Map<string, Balance>();
-  for (const balance of perStatement.values()) {
-    const key = `${balance.account}\n${balance.date}`;
-    const earlier = firstListed.get(key);
-    if (!earlier) firstListed.set(key, balance);
-    else if (earlier.pence !== balance.pence) {
-      throw new Error(
-        `${earlier.statement} and ${balance.statement} give different Balances for ${balance.account} on ${balance.date}`,
-      );
-    }
-  }
-}
 
 /** Each Account's latest Balance dated on or before the given day; on a shared date, the last listed wins. */
 function latestBalancesOnOrBefore(balances: Balance[], day: IsoDate): Map<string, Balance> {

@@ -66,13 +66,17 @@ async function readStatement(path: string, read: StatementReader): Promise<{ acc
   }
 }
 
-/** Every Balance and Transaction from every Statement, failing with every file that could not be read. */
+/** Every Balance and Transaction from every Statement, reconciled where Statements overlap, failing with every file that could not be read. */
 export async function scanStatements(dataFolder: string): Promise<{ balances: Balance[]; transactions: Transaction[] }> {
-  return combineStatements(await readStatements(dataFolder));
+  return reconcileStatements(await readStatements(dataFolder));
 }
 
-/** Every Balance and Transaction from the files read, each tagged with its Account and Statement file, failing with every file that could not be read. */
-export function combineStatements(statements: StatementRead[]): { balances: Balance[]; transactions: Transaction[] } {
+/**
+ * Every Balance and Transaction from the files read, each tagged with its Account and Statement file, failing with every
+ * file that could not be read. It gives one Balance per Account and date, failing when overlapping Statements disagree,
+ * and counts each Transaction once where Statements overlap.
+ */
+export function reconcileStatements(statements: StatementRead[]): { balances: Balance[]; transactions: Transaction[] } {
   const unreadable = statements.flatMap((s) => ("error" in s ? [`Could not read ${s.file}: ${s.error}`] : []));
   if (unreadable.length > 0) throw new Error(unreadable.join("\n"));
   const balances: Balance[] = [];
@@ -84,5 +88,44 @@ export function combineStatements(statements: StatementRead[]): { balances: Bala
       for (const transaction of accountTransactions) transactions.push({ ...transaction, statement: statement.file, account: name });
     }
   }
-  return { balances, transactions };
+  return { balances: agreedBalances(balances), transactions: withoutOverlaps(transactions) };
+}
+
+/**
+ * One Balance per Account and date, failing when two Statements give different Balances for the same Account and date.
+ * Within one Statement, several Running Balances can share a date, so each Statement's last listed one counts.
+ */
+function agreedBalances(balances: Balance[]): Balance[] {
+  const perStatement = new Map<string, Balance>();
+  for (const balance of balances) perStatement.set(`${balance.statement}\n${balance.account}\n${balance.date}`, balance);
+  const firstListed = new Map<string, Balance>();
+  for (const balance of perStatement.values()) {
+    const key = `${balance.account}\n${balance.date}`;
+    const earlier = firstListed.get(key);
+    if (!earlier) firstListed.set(key, balance);
+    else if (earlier.pence !== balance.pence) {
+      throw new Error(
+        `${earlier.statement} and ${balance.statement} give different Balances for ${balance.account} on ${balance.date}`,
+      );
+    }
+  }
+  return [...firstListed.values()];
+}
+
+/**
+ * Overlapping Statements list some Transactions twice, while one Statement can list two identical Transactions,
+ * such as two coffees at the same price on the same day. So a Transaction, identified by its Account, date,
+ * description, amount and direction, counts as many times as the one Statement listing it most.
+ */
+function withoutOverlaps(transactions: Transaction[]): Transaction[] {
+  const byIdentity = new Map<string, Map<string, Transaction[]>>();
+  for (const t of transactions) {
+    const identity = [t.account, t.date, t.description, t.pence, t.direction].join("\n");
+    const byStatement = byIdentity.get(identity) ?? new Map<string, Transaction[]>();
+    byStatement.set(t.statement, [...(byStatement.get(t.statement) ?? []), t]);
+    byIdentity.set(identity, byStatement);
+  }
+  return [...byIdentity.values()].flatMap((byStatement) =>
+    [...byStatement.values()].reduce((most, listed) => (listed.length > most.length ? listed : most)),
+  );
 }

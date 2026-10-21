@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { combineStatements, readStatements, scanStatements, type StatementRead } from "./scanStatements.js";
+import { readStatements, reconcileStatements, scanStatements, type StatementRead } from "./scanStatements.js";
+import type { StatementBalance, StatementTransaction } from "./statements.js";
 
 const KNOWN_FOLDERS = ["Amex Statements", "HSBC Statements", "Kroo", "Vanguard Statements"];
 
@@ -82,7 +83,7 @@ describe("readStatements", () => {
   });
 });
 
-describe("combineStatements", () => {
+describe("reconcileStatements", () => {
   it("tags every Balance and Transaction with its Account and Statement file", () => {
     // Made-up reads. Every figure and description is invented.
     const reads: StatementRead[] = [
@@ -105,7 +106,7 @@ describe("combineStatements", () => {
         accounts: [{ name: "Vanguard ISA", kind: "Asset", balances: [{ date: "2026-01-05", pence: 500000, source: "Closing" }], transactions: [] }],
       },
     ];
-    expect(combineStatements(reads)).toEqual({
+    expect(reconcileStatements(reads)).toEqual({
       balances: [
         { statement: "HSBC Statements/2026-01.pdf", account: "HSBC", kind: "Asset", date: "2026-01-27", pence: 99000, source: "Closing" },
         { statement: "Vanguard Statements/2026-01.pdf", account: "Vanguard ISA", kind: "Asset", date: "2026-01-05", pence: 500000, source: "Closing" },
@@ -116,4 +117,51 @@ describe("combineStatements", () => {
       ],
     });
   });
+
+  it("fails rather than guessing when two Statements give different Balances for the same Account and date, naming both Statements", () => {
+    const reads = [hsbcRead("HSBC Statements/January.pdf", [running("2026-01-31", 80000)]), hsbcRead("HSBC Statements/February.pdf", [running("2026-01-31", 80001)])];
+    expect(() => reconcileStatements(reads)).toThrow(
+      "HSBC Statements/January.pdf and HSBC Statements/February.pdf give different Balances for HSBC on 2026-01-31",
+    );
+  });
+
+  it("gives one Balance per Account and date where overlapping Statements agree, taking each Statement's last listed Running Balance on a date", () => {
+    const reads = [
+      hsbcRead("HSBC Statements/January.pdf", [running("2026-01-20", 70000), running("2026-01-20", 75000), running("2026-01-31", 80000)]),
+      hsbcRead("HSBC Statements/Mid-January.pdf", [running("2026-01-20", 75000), running("2026-01-31", 80000), running("2026-02-15", 90000)]),
+    ];
+    const hsbc = (statement: string, date: string, pence: number) => ({ statement, account: "HSBC", kind: "Asset", date, pence, source: "Running" });
+    expect(reconcileStatements(reads).balances).toEqual([
+      hsbc("HSBC Statements/January.pdf", "2026-01-20", 75000),
+      hsbc("HSBC Statements/January.pdf", "2026-01-31", 80000),
+      hsbc("HSBC Statements/Mid-January.pdf", "2026-02-15", 90000),
+    ]);
+  });
+
+  it("counts a Transaction found in several Statements as many times as the one Statement listing it most, so overlaps count once and repeats are kept", () => {
+    const coffee: StatementTransaction = { date: "2026-01-27", description: "))) COFFEE PLACE", pence: 320, direction: "Out" };
+    const otherCafe = { ...coffee, description: "))) OTHER CAFE" };
+    const refund = { ...coffee, direction: "In" as const };
+    const reads = [
+      hsbcRead("HSBC Statements/2026-01.pdf", [], [coffee, coffee]),
+      hsbcRead("HSBC Statements/2026-02.pdf", [], [coffee, otherCafe, refund]),
+      { file: "Kroo/2026.pdf", accounts: [{ name: "Kroo", kind: "Asset", balances: [], transactions: [coffee] }] } satisfies StatementRead,
+    ];
+    const tagged = (statement: string, account: string, transaction: StatementTransaction) => ({ statement, account, ...transaction });
+    expect(reconcileStatements(reads).transactions).toEqual([
+      tagged("HSBC Statements/2026-01.pdf", "HSBC", coffee),
+      tagged("HSBC Statements/2026-01.pdf", "HSBC", coffee),
+      tagged("HSBC Statements/2026-02.pdf", "HSBC", otherCafe),
+      tagged("HSBC Statements/2026-02.pdf", "HSBC", refund),
+      tagged("Kroo/2026.pdf", "Kroo", coffee),
+    ]);
+  });
 });
+
+// Made-up HSBC reads. Every figure and description is invented.
+const hsbcRead = (file: string, balances: StatementBalance[], transactions: StatementTransaction[] = []): StatementRead => ({
+  file,
+  accounts: [{ name: "HSBC", kind: "Asset", balances, transactions }],
+});
+
+const running = (date: string, pence: number): StatementBalance => ({ date, pence, source: "Running" });

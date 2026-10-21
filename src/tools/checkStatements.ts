@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { calculateNetWorth } from "../netWorth.js";
 import { localToday, monthEndsFrom } from "../report.js";
-import { readStatements, scanStatements } from "../scanStatements.js";
+import { readStatements, reconcileStatements } from "../scanStatements.js";
 import { loadSettings } from "../settings.js";
 import type { Pence } from "../statements.js";
 
@@ -13,8 +13,8 @@ import type { Pence } from "../statements.js";
 const [only = ""] = process.argv.slice(2);
 try {
   const settings = await loadSettings(fileURLToPath(new URL("../..", import.meta.url)));
-  const statements = (await readStatements(settings.dataFolder)).filter((s) => s.file.includes(only));
-  for (const statement of statements) {
+  const reads = await readStatements(settings.dataFolder);
+  for (const statement of reads.filter((s) => s.file.includes(only))) {
     console.log(statement.file);
     if ("error" in statement) {
       console.log(`  Could not read: ${statement.error}`);
@@ -27,7 +27,7 @@ try {
       console.log(`  ${name} (${kind}): Closing Balance ${closingText}; ${running.length} Running Balances; ${transactions.length} Transactions`);
     }
   }
-  const { balances } = await scanStatements(settings.dataFolder);
+  const { balances } = reconcileStatements(reads);
   const today = localToday();
   const { snapshots } = calculateNetWorth({ balances, monthEnds: monthEndsFrom(settings.trackingStart, today), today });
   console.log("\nMonth-End Snapshots (Net Worth = Assets - Liabilities)");

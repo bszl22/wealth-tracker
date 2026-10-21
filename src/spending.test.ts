@@ -72,23 +72,6 @@ describe("calculateSpending", () => {
     ]);
   });
 
-  it("counts a Transaction found in several Statements as many times as the one Statement listing it most, so overlaps count once and repeats are kept", () => {
-    const january = "HSBC Statements/2026-01.pdf";
-    const february = "HSBC Statements/2026-02.pdf";
-    const coffee = (statement: string) => hsbc("2026-01-27", "Out", 320, "))) COFFEE PLACE", statement);
-    const transactions = [
-      coffee(january),
-      coffee(january),
-      coffee(february),
-      hsbc("2026-01-27", "Out", 320, "))) OTHER CAFE", february),
-      hsbc("2026-01-27", "In", 320, "))) COFFEE PLACE", february),
-      { ...coffee(february), account: "Kroo" },
-    ];
-    const { months } = calculateSpending({ transactions, ...noRules, monthEnds: ["2026-01-31"], today: "2026-01-31" });
-    expect(months[0]?.spending.uncategorised.pence).toBe(320 * 4);
-    expect(months[0]?.earnings.uncategorised.pence).toBe(320);
-  });
-
   it("gives each Transaction the Category and Subcategory of the first rule whose text its description contains, ignoring case", () => {
     const rules: CategorisationRule[] = [
       { contains: "corner shop", category: "Food", subcategory: "Groceries" },

@@ -36,12 +36,6 @@ describe("calculateNetWorth", () => {
     ]);
   });
 
-  it("uses the last Balance listed when several share a date", () => {
-    const balances = [hsbc("2026-01-30", 10000), hsbc("2026-01-30", 20000), hsbc("2026-01-30", 15000)];
-    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31"], today: "2026-01-31" });
-    expect(snapshots).toEqual([assetsOnly("2026-01-31", 15000)]);
-  });
-
   it("totals each Account's Balance to the penny", () => {
     const balances = [hsbc("2026-01-10", 10), { ...hsbc("2026-01-12", 20), account: "Savings" }];
     const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31"], today: "2026-01-31" });
@@ -62,7 +56,6 @@ describe("calculateNetWorth", () => {
       kroo("2026-04-05", 40000, "Closing"),
       kroo("2025-04-06", 10000),
       kroo("2025-12-20", 20000),
-      kroo("2026-01-31", 25000),
       kroo("2026-01-31", 30000),
       kroo("2026-03-02", 40000),
     ];
@@ -136,26 +129,6 @@ describe("calculateNetWorth", () => {
       assetsOnly("2026-01-31", 50000),
       assetsOnly("2026-02-28", 65000),
     ]);
-  });
-
-  it("fails rather than guessing when two Statements give different Balances for the same Account and date, naming both Statements", () => {
-    const balances = [hsbc("2026-01-31", 80000, "HSBC Statements/January.pdf"), hsbc("2026-01-31", 80001, "HSBC Statements/February.pdf")];
-    expect(() => calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-10" })).toThrow(
-      "HSBC Statements/January.pdf and HSBC Statements/February.pdf give different Balances for HSBC on 2026-01-31",
-    );
-  });
-
-  it("accepts overlapping Statements that give the same Balance for a date, even where one lists several Running Balances on it", () => {
-    const balances = [
-      hsbc("2026-01-20", 70000, "HSBC Statements/January.pdf"),
-      hsbc("2026-01-20", 75000, "HSBC Statements/January.pdf"),
-      hsbc("2026-01-31", 80000, "HSBC Statements/January.pdf"),
-      hsbc("2026-01-20", 75000, "HSBC Statements/Mid-January.pdf"),
-      hsbc("2026-01-31", 80000, "HSBC Statements/Mid-January.pdf"),
-      hsbc("2026-02-15", 90000, "HSBC Statements/Mid-January.pdf"),
-    ];
-    const { snapshots } = calculateNetWorth({ balances, monthEnds: ["2026-01-31", "2026-02-28"], today: "2026-02-20" });
-    expect(snapshots).toEqual([assetsOnly("2026-01-31", 80000), assetsOnly("2026-02-28", 90000)]);
   });
 });
 

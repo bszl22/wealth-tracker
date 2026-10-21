@@ -57,7 +57,7 @@ export type SubcategoryChange = {
 export type UncategorisedDescription = { description: string; direction: Direction; pence: Pence; transactions: Transaction[] };
 
 export type SpendingInput = {
-  /** Every Transaction from every Statement, each Statement's Transactions in the order it lists them. */
+  /** Every Transaction from every Statement, counted once where Statements overlap. */
   transactions: Transaction[];
   categories: Category[];
   /** The Categorisation Rules, in the order the rules file lists them. */
@@ -79,7 +79,7 @@ export function calculateSpending({ transactions, categories, rules, monthEnds, 
   uncategorised: UncategorisedDescription[];
 } {
   const shown = new Set(monthEnds.map((monthEnd) => monthEnd.slice(0, 7)));
-  const matched = withoutOverlaps(transactions)
+  const matched = transactions
     .filter(({ date }) => shown.has(date.slice(0, 7)))
     .map((transaction): Matched => ({ transaction, rule: firstMatch(rules, transaction) }));
   const months = monthEnds.map((monthEnd) => {
@@ -176,24 +176,6 @@ function breakdown(kind: CategoryKind, categories: Category[], matched: Matched[
     categories: totals,
     uncategorised,
   };
-}
-
-/**
- * Overlapping Statements list some Transactions twice, while one Statement can list two identical Transactions,
- * such as two coffees at the same price on the same day. So a Transaction, identified by its Account, date,
- * description, amount and direction, counts as many times as the one Statement listing it most.
- */
-function withoutOverlaps(transactions: Transaction[]): Transaction[] {
-  const byIdentity = new Map<string, Map<string, Transaction[]>>();
-  for (const t of transactions) {
-    const identity = [t.account, t.date, t.description, t.pence, t.direction].join("\n");
-    const byStatement = byIdentity.get(identity) ?? new Map<string, Transaction[]>();
-    byStatement.set(t.statement, [...(byStatement.get(t.statement) ?? []), t]);
-    byIdentity.set(identity, byStatement);
-  }
-  return [...byIdentity.values()].flatMap((byStatement) =>
-    [...byStatement.values()].reduce((most, listed) => (listed.length > most.length ? listed : most)),
-  );
 }
 
 function transactionsOf(matched: Matched[]): Transaction[] {
