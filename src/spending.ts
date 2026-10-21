@@ -1,4 +1,4 @@
-import { monthEndsFrom, type YearMonth } from "./netWorth.js";
+import { monthEndsFrom, type MonthEndSnapshot, type YearMonth } from "./netWorth.js";
 import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
 import type { Direction, IsoDate, Pence, StatementTransaction } from "./statements.js";
 
@@ -26,7 +26,15 @@ export type SpendingMonth = {
   net: Pence;
   /** How the month differs from the months before it, for a full month with an earlier month since Tracking Start. */
   whatChanged: WhatChanged | undefined;
+  /** The month's change in Net Worth broken down, for a month with an earlier Month-End Snapshot. */
+  netWorthChange: NetWorthChange | undefined;
 };
+
+/**
+ * A month's change in Net Worth since the Month-End Snapshot before it, as its Net (Earnings minus Spending) plus
+ * Other Change. Other Change is one figure, never split by estimation, since only printed Balances are known (ADR 0002).
+ */
+export type NetWorthChange = { since: IsoDate; change: Pence; net: Pence; otherChange: Pence };
 
 /**
  * A full month against the average of up to 3 months before it since Tracking Start: each Subcategory's change, largest
@@ -55,6 +63,8 @@ export type UncategorisedDescription = { description: string; direction: Directi
 export type SpendingInput = {
   /** Every Transaction from every Statement, each Statement's Transactions in the order it lists them. */
   transactions: Transaction[];
+  /** The Month-End Snapshots from Tracking Start through the current month. */
+  snapshots: MonthEndSnapshot[];
   categories: Category[];
   /** The Categorisation Rules, in the order the rules file lists them. */
   rules: CategorisationRule[];
@@ -69,7 +79,7 @@ type Matched = { transaction: Transaction; rule: CategorisationRule | undefined 
  * Spending and Earnings for each month from Tracking Start through the current month, sorted into Categories by the
  * Categorisation Rules, and the Uncategorised descriptions across those months, largest total first.
  */
-export function calculateSpending({ transactions, categories, rules, trackingStart, today }: SpendingInput): {
+export function calculateSpending({ transactions, snapshots, categories, rules, trackingStart, today }: SpendingInput): {
   months: SpendingMonth[];
   uncategorised: UncategorisedDescription[];
 } {
@@ -89,6 +99,7 @@ export function calculateSpending({ transactions, categories, rules, trackingSta
     months: months.map((month, i): SpendingMonth => ({
       ...month,
       whatChanged: month.partial || i === 0 ? undefined : whatChanged(month, months.slice(Math.max(0, i - COMPARED_MONTHS), i)),
+      netWorthChange: i === 0 ? undefined : netWorthChange(month, months[i - 1]!.monthEnd, snapshots),
     })),
     uncategorised: rankedUncategorised(matched),
   };
@@ -97,7 +108,15 @@ export function calculateSpending({ transactions, categories, rules, trackingSta
 /** How many months before a month its "What changed" compares with, when there are that many since Tracking Start. */
 const COMPARED_MONTHS = 3;
 
-type MonthFigures = Omit<SpendingMonth, "whatChanged">;
+type MonthFigures = Omit<SpendingMonth, "whatChanged" | "netWorthChange">;
+
+function netWorthChange({ monthEnd, net }: MonthFigures, since: IsoDate, snapshots: MonthEndSnapshot[]): NetWorthChange | undefined {
+  const netWorthOn = (day: IsoDate) => snapshots.find((snapshot) => snapshot.monthEnd === day)?.netWorth;
+  const [before, after] = [netWorthOn(since), netWorthOn(monthEnd)];
+  if (before === undefined || after === undefined) return undefined;
+  const change = after - before;
+  return { since, change, net, otherChange: change - net };
+}
 
 function whatChanged(month: MonthFigures, earlier: MonthFigures[]): WhatChanged {
   const changes = (["Spending", "Earnings"] as const).flatMap((kind) => {

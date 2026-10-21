@@ -389,15 +389,7 @@ const signed = (pence) => (pence > 0 ? `+${gbp(pence)}` : pence < 0 ? `−${gbp(
  * largest Spending Transactions, each line listing its Transactions when clicked.
  */
 function whatChangedPanel(months) {
-  const section = el("div", { class: "what-changed" });
-  const body = el("div");
-  const heading = el("h2");
-  section.append(heading, body);
-  monthSelection.follow((selected) => {
-    const month = months.find((m) => m.monthEnd === selected);
-    body.replaceChildren();
-    heading.textContent = month ? `What changed in ${monthLabel(month.monthEnd)}` : "What changed";
-    if (!month) return;
+  return monthPanel(months, "What changed", (month) => monthLabel(month.monthEnd), (month, body) => {
     if (month.partial) {
       body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} isn't over yet, so it isn't compared with earlier months.`));
       return;
@@ -438,8 +430,49 @@ function whatChangedPanel(months) {
       body.append(el("h3", {}, "Largest Spending Transactions"), scrolling(table));
     }
     body.append(panel);
+  }, "what-changed");
+}
+
+/**
+ * A heading and body following the selected month: the heading names the month, and `show` fills the body for it.
+ */
+function monthPanel(months, title, label, show, className) {
+  const section = el("div", className ? { class: className } : {});
+  const body = el("div");
+  const heading = el("h2");
+  section.append(heading, body);
+  monthSelection.follow((selected) => {
+    const month = months.find((m) => m.monthEnd === selected);
+    body.replaceChildren();
+    heading.textContent = month ? `${title} in ${label(month)}` : title;
+    if (month) show(month, body);
   });
   return section;
+}
+
+/** The selected month's change in Net Worth, as Earnings − Spending plus Other Change. */
+function netWorthChangePanel(months) {
+  return monthPanel(months, "Change in Net Worth", monthHeading, (month, body) => {
+    if (!month.netWorthChange) {
+      body.append(el("div", { class: "muted" }, `${monthLabel(month.monthEnd)} is Tracking Start, so there's no earlier Month-End Snapshot to change from.`));
+      return;
+    }
+    const { since, change, net, otherChange } = month.netWorthChange;
+    const table = el("table");
+    for (const [label, pence, className] of [
+      ["Earnings − Spending", net],
+      ["Other Change", otherChange],
+      [`Change in Net Worth since ${monthLabel(since)} month end`, change, "total"],
+    ]) {
+      const row = el("tr", className ? { class: className } : {});
+      row.append(el("td", {}, label), el("td", { class: "balance" }, signed(pence)));
+      table.append(row);
+    }
+    body.append(
+      table,
+      el("div", { class: "muted" }, "Other Change is what Earnings − Spending doesn't explain. It usually holds investment growth or falls, and timing between purchases and Statement dates."),
+    );
+  });
 }
 
 /** Every Transaction behind a month's Spending or Earnings. */
@@ -554,6 +587,7 @@ async function render() {
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(report.snapshots, months),
     spendingChart(months, categories),
+    netWorthChangePanel(months),
     whatChangedPanel(months),
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),

@@ -36,9 +36,11 @@ async function report(settings: Settings) {
     const { categories, rules, path, found } = await loadRules(settings.dataFolder);
     const today = localToday();
     const { trackingStart } = settings;
+    const netWorth = calculateNetWorth({ balances, trackingStart, today });
+    const { snapshots } = netWorth;
     return {
-      ...calculateNetWorth({ balances, trackingStart, today }),
-      spending: { ...calculateSpending({ transactions, categories, rules, trackingStart, today }), categories, rulesFile: { path, found } },
+      ...netWorth,
+      spending: { ...calculateSpending({ transactions, snapshots, categories, rules, trackingStart, today }), categories, rulesFile: { path, found } },
     };
   } catch (error) {
     return { error: (error as Error).message };
