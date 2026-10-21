@@ -44,6 +44,12 @@
   button.expand[aria-expanded="true"]::before { content: "▾"; }
   button.expand:focus-visible { outline: 2px solid var(--assets); outline-offset: 2px; }
   code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  button.cell { all: unset; cursor: pointer; border-bottom: 1px dotted var(--muted); }
+  button.cell:hover, button.cell[aria-pressed="true"] { color: var(--assets); border-bottom-color: var(--assets); }
+  button.cell:focus-visible { outline: 2px solid var(--assets); outline-offset: 2px; }
+  .transactions { margin-top: 12px; padding: 12px 16px; border: 1px solid var(--grid); border-radius: 8px; }
+  .transactions h3 { font-size: 14px; margin: 0 0 4px; }
+  .transactions td.description { white-space: normal; }
 </style>
 </head>
 <body>
@@ -107,11 +113,16 @@ function niceStep(raw) {
   return [1, 2, 5, 10].map((m) => m * magnitude).find((s) => s >= raw);
 }
 
+/** A table's header row, from [label, className] pairs. */
+function headerRow(columns) {
+  const head = el("tr");
+  for (const [label, className] of columns) head.append(el("th", className ? { class: className } : {}, label));
+  return head;
+}
+
 function accountTable(accounts) {
   const table = el("table");
-  const head = el("tr");
-  for (const [label, className] of [["Account"], ["Kind"], ["Latest Balance", "balance"], ["Dated"]]) head.append(el("th", className ? { class: className } : {}, label));
-  table.append(head);
+  table.append(headerRow([["Account"], ["Kind"], ["Latest Balance", "balance"], ["Dated"]]));
   for (const { account, kind, pence, date, stale } of accounts) {
     const dated = el("td", {}, dayLabel(date));
     if (stale) dated.append(el("span", { class: "stale", title: "Latest Balance is more than 2 months old. It still counts in Net Worth." }, "Stale"));
@@ -124,17 +135,68 @@ function accountTable(accounts) {
 
 const monthHeading = (month) => (month.partial ? `${monthLabel(month.monthEnd)} so far` : monthLabel(month.monthEnd));
 
-/** A table with months across the top and one row per figure. A row with subrows expands to show them. */
-function monthTable(heading, months, rows) {
+/**
+ * The Transactions behind a figure: date, Account, description and amount. Amounts moving the figure the other way,
+ * such as a Refund under Spending, show as negative.
+ */
+function transactionList(title, transactions, adds) {
+  const panel = el("div", { class: "transactions" });
+  panel.append(el("h3", {}, title));
+  if (transactions.length === 0) {
+    panel.append(el("div", { class: "muted" }, "No Transactions."));
+    return panel;
+  }
+  const table = el("table");
+  table.append(headerRow([["Date"], ["Account"], ["Description"], ["Amount", "balance"]]));
+  const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
+  for (const { date, account, description, pence, direction } of sorted) {
+    const row = el("tr");
+    row.append(
+      el("td", {}, dayLabel(date)),
+      el("td", {}, account),
+      el("td", { class: "description" }, description),
+      el("td", { class: "balance" }, gbp(direction === adds ? pence : -pence)),
+    );
+    table.append(row);
+  }
+  panel.append(table);
+  return panel;
+}
+
+/** A figure that lists its Transactions below `panel` when clicked, and hides them when clicked again. */
+function figureButton(text, title, transactions, adds, panel) {
+  const button = el("button", { class: "cell", type: "button", "aria-pressed": "false" }, text);
+  button.addEventListener("click", () => {
+    const opening = button.getAttribute("aria-pressed") !== "true";
+    for (const other of document.querySelectorAll('button.cell[aria-pressed="true"]')) other.setAttribute("aria-pressed", "false");
+    for (const other of document.querySelectorAll(".transactions-panel")) other.replaceChildren();
+    if (!opening) return;
+    button.setAttribute("aria-pressed", "true");
+    panel.replaceChildren(transactionList(title, transactions, adds));
+  });
+  return button;
+}
+
+/**
+ * A table with months across the top and one row per figure. A row with subrows expands to show them. Clicking a
+ * figure from a row with Transactions lists them below the table, `adds` being the direction that adds to the figure.
+ */
+function monthTable(heading, months, rows, adds) {
+  const panel = el("div", { class: "transactions-panel" });
   const table = el("table", { class: "months" });
   const head = el("tr");
   head.append(el("th", {}, heading));
   for (const month of months) head.append(el("th", { class: "balance" }, monthHeading(month)));
   table.append(head);
-  const figureRow = ({ label, pence, className }, labelCell) => {
+  const figureRow = ({ label, pence, transactions, className }, labelCell) => {
     const row = el("tr", className ? { class: className } : {});
     row.append(labelCell ?? el("td", {}, label));
-    for (const month of months) row.append(el("td", { class: "balance" }, gbp(pence(month))));
+    for (const month of months) {
+      const cell = el("td", { class: "balance" });
+      const text = gbp(pence(month));
+      cell.append(transactions ? figureButton(text, `${label}, ${monthHeading(month)}: ${text}`, transactions(month), adds, panel) : text);
+      row.append(cell);
+    }
     return row;
   };
   for (const figure of rows) {
@@ -156,8 +218,13 @@ function monthTable(heading, months, rows) {
   }
   const scroll = el("div", { class: "scroll" });
   scroll.append(table);
-  return scroll;
+  const section = el("div");
+  section.append(scroll, panel);
+  return section;
 }
+
+/** Every Transaction behind a month's Spending or Earnings. */
+const breakdownTransactions = (breakdown) => [...breakdown.categories.flatMap((c) => c.transactions), ...breakdown.uncategorisedTransactions];
 
 /** One row per Category of the kind, expandable into its Subcategories, then Uncategorised and the total. */
 function breakdownRows(categories, kind, figures) {
@@ -166,12 +233,22 @@ function breakdownRows(categories, kind, figures) {
     .map((category, i) => ({
       label: category.name,
       pence: (m) => figures(m).categories[i].total,
-      subrows: category.subcategories.map((name, j) => ({ label: name, pence: (m) => figures(m).categories[i].subcategories[j].pence })),
+      transactions: (m) => figures(m).categories[i].transactions,
+      subrows: category.subcategories.map((name, j) => ({
+        label: name,
+        pence: (m) => figures(m).categories[i].subcategories[j].pence,
+        transactions: (m) => figures(m).categories[i].subcategories[j].transactions,
+      })),
     }));
   return [
     ...rows,
-    { label: "Uncategorised", pence: (m) => figures(m).uncategorised },
-    { label: `Total ${kind}`, pence: (m) => figures(m).total, className: "total" },
+    { label: "Uncategorised", pence: (m) => figures(m).uncategorised, transactions: (m) => figures(m).uncategorisedTransactions },
+    {
+      label: `Total ${kind}`,
+      pence: (m) => figures(m).total,
+      transactions: (m) => breakdownTransactions(figures(m)),
+      className: "total",
+    },
   ];
 }
 
@@ -186,17 +263,48 @@ function rulesFileNote({ path, found }) {
   return note;
 }
 
-function spendingSection({ months, categories, rulesFile }) {
+/** Uncategorised descriptions, largest total first, each listing its Transactions when clicked. */
+function uncategorisedList(uncategorised) {
+  const section = el("div");
+  section.append(el("h2", {}, "Uncategorised"));
+  if (uncategorised.length === 0) {
+    section.append(el("div", { class: "muted" }, "Every Transaction is sorted into a Category or marked as a Transfer."));
+    return section;
+  }
+  section.append(el("div", { class: "muted" }, "Descriptions no Categorisation Rule matches, largest total first, so the next rule to write is at the top. Click a total to see its Transactions."));
+  const panel = el("div", { class: "transactions-panel" });
+  const table = el("table");
+  table.append(headerRow([["Description"], ["Uncategorised"], ["Transactions", "balance"], ["Total", "balance"]]));
+  for (const { description, direction, pence, transactions } of uncategorised) {
+    const kind = direction === "Out" ? "Spending" : "Earnings";
+    const total = el("td", { class: "balance" });
+    total.append(figureButton(gbp(pence), `${description}, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
+    const row = el("tr");
+    row.append(el("td", { class: "description" }, description), el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total);
+    table.append(row);
+  }
+  section.append(table, panel);
+  return section;
+}
+
+function spendingSection({ months, uncategorised, categories, rulesFile }) {
   const section = el("div");
   section.append(
     el("h2", {}, "Spending"),
     rulesFileNote(rulesFile),
-    monthTable("Spending", months, breakdownRows(categories, "Spending", (m) => m.spending)),
+    monthTable("Spending", months, breakdownRows(categories, "Spending", (m) => m.spending), "Out"),
     el("h2", {}, "Earnings"),
     monthTable("Earnings", months, [
       ...breakdownRows(categories, "Earnings", (m) => m.earnings),
-      { label: "Net (Earnings − Spending)", pence: (m) => m.net, className: "net" },
-    ]),
+      // Money in adds to Net and money out takes from it, under Spending and Earnings alike.
+      {
+        label: "Net (Earnings − Spending)",
+        pence: (m) => m.net,
+        transactions: (m) => [...breakdownTransactions(m.earnings), ...breakdownTransactions(m.spending)],
+        className: "net",
+      },
+    ], "In"),
+    uncategorisedList(uncategorised),
   );
   return section;
 }
