@@ -5,9 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wealth Tracker</title>
 <style>
-  :root { --bg: #fbfaf8; --fg: #1f1d1a; --muted: #6b665e; --grid: #e6e2db; --netWorth: #2f6f5e; --assets: #3b6ea8; --liabilities: #b0563a; --error-bg: #fbeaea; --error-fg: #8a1f1f; }
+  :root {
+    --bg: #fbfaf8; --fg: #1f1d1a; --muted: #6b665e; --grid: #e6e2db; --selected: #ebf0f6; --netWorth: #2f6f5e; --assets: #3b6ea8; --liabilities: #b0563a; --error-bg: #fbeaea; --error-fg: #8a1f1f;
+    --category-0: #3b6ea8; --category-1: #c07a2c; --category-2: #2f8f6f; --category-3: #9b4f96; --category-4: #b0563a; --category-5: #5a8f29; --category-6: #c2577f; --category-7: #4f7f8f; --uncategorised: #b3ada4;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #171614; --fg: #ece8e1; --muted: #9a948a; --grid: #2e2b27; --netWorth: #6cc2a8; --assets: #7fa8d8; --liabilities: #e08a6c; --error-bg: #3a1c1c; --error-fg: #f2b8b8; }
+    :root {
+      --bg: #171614; --fg: #ece8e1; --muted: #9a948a; --grid: #2e2b27; --selected: #232c36; --netWorth: #6cc2a8; --assets: #7fa8d8; --liabilities: #e08a6c; --error-bg: #3a1c1c; --error-fg: #f2b8b8;
+      --category-0: #7fa8d8; --category-1: #e0a96a; --category-2: #6cc2a8; --category-3: #c98ac4; --category-4: #e08a6c; --category-5: #9cc56a; --category-6: #e690b0; --category-7: #8fbccb; --uncategorised: #6b665e;
+    }
   }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   main { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
@@ -20,11 +26,23 @@
   .netWorth { --series: var(--netWorth); }
   .assets { --series: var(--assets); }
   .liabilities { --series: var(--liabilities); }
+  .category-0 { --series: var(--category-0); } .category-1 { --series: var(--category-1); } .category-2 { --series: var(--category-2); } .category-3 { --series: var(--category-3); }
+  .category-4 { --series: var(--category-4); } .category-5 { --series: var(--category-5); } .category-6 { --series: var(--category-6); } .category-7 { --series: var(--category-7); }
+  .uncategorised { --series: var(--uncategorised); }
   polyline { fill: none; stroke: var(--series); stroke-width: 2; }
   polyline.netWorth { stroke-width: 3; }
   circle { fill: var(--series); }
   .legend { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 16px; font-size: 13px; color: var(--muted); }
   .legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--series); }
+  .legend.swatches span::before { width: 10px; height: 10px; border-radius: 2px; }
+  svg.months { cursor: pointer; }
+  rect.segment { fill: var(--series); }
+  rect.segment.partial { opacity: 0.55; }
+  rect.month-band { fill: var(--selected); }
+  table.months .selected { background: var(--selected); }
+  button.month { all: unset; cursor: pointer; }
+  button.month:hover, button.month[aria-pressed="true"] { color: var(--fg); }
+  button.month:focus-visible { outline: 2px solid var(--assets); outline-offset: 2px; }
   h2 { font-size: 17px; margin: 32px 0 8px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 8px 12px 8px 0; border-bottom: 1px solid var(--grid); }
@@ -75,27 +93,86 @@ const SERIES = [
   { key: "liabilities", label: "Total Liabilities" },
 ];
 
-function legend() {
-  const node = el("div", { class: "legend" });
-  for (const { key, label } of SERIES) node.append(el("span", { class: key }, label));
+/** A legend from [className, label] pairs, as lines or, for bars, as swatches. */
+function legend(entries, swatches = false) {
+  const node = el("div", { class: swatches ? "legend swatches" : "legend" });
+  for (const [className, label] of entries) node.append(el("span", { class: className }, label));
   return node;
 }
 
-function chart(snapshots) {
-  const width = 900, height = 360, left = 80, right = 20, top = 10, bottom = 30;
-  const balances = snapshots.flatMap((s) => SERIES.map(({ key }) => s[key]));
-  let min = Math.min(0, ...balances), max = Math.max(...balances);
+/**
+ * The selected month, shared by both charts and both tables. Each registers a function showing the selection, so
+ * selecting a month in any of them shows it in all of them.
+ */
+const monthSelection = {
+  selected: undefined,
+  shows: [],
+  /** Calls `show` with the selected month end now, and again whenever another month is selected. */
+  follow(show) {
+    this.shows.push(show);
+    show(this.selected);
+  },
+  select(monthEnd) {
+    this.selected = monthEnd;
+    for (const show of this.shows) show(monthEnd);
+  },
+};
+
+// Both charts share one month axis, each month a band of equal width, so a month's bar sits under its Net Worth point.
+const CHART_WIDTH = 900, CHART_LEFT = 80, CHART_RIGHT = 20;
+const monthBand = (count) => (CHART_WIDTH - CHART_LEFT - CHART_RIGHT) / count;
+const monthX = (count) => (i) => CHART_LEFT + (i + 0.5) * monthBand(count);
+
+/** Gridlines labelled in GBP from zero or the lowest figure to the highest, returning the vertical scale. */
+function valueAxis(svg, pence, top, bottom) {
+  let min = Math.min(0, ...pence), max = Math.max(...pence);
   if (max === min) max = min + 100;
   const step = niceStep((max - min) / 5);
   min = Math.floor(min / step) * step; max = Math.ceil(max / step) * step;
-  const x = (i) => left + (snapshots.length === 1 ? (width - left - right) / 2 : (i * (width - left - right)) / (snapshots.length - 1));
-  const y = (v) => top + ((max - v) * (height - top - bottom)) / (max - min);
-  const svg = el("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "Net Worth, total Assets and total Liabilities at each month end" });
+  const y = (v) => top + ((max - v) * (bottom - top)) / (max - min);
   for (let v = min; v <= max; v += step) {
-    svg.append(el("line", { svg: 1, class: "grid", x1: left, x2: width - right, y1: y(v), y2: y(v) }));
-    svg.append(el("text", { svg: 1, x: left - 8, y: y(v) + 4, "text-anchor": "end" }, gbp(v)));
+    svg.append(el("line", { svg: 1, class: "grid", x1: CHART_LEFT, x2: CHART_WIDTH - CHART_RIGHT, y1: y(v), y2: y(v) }));
+    svg.append(el("text", { svg: 1, x: CHART_LEFT - 8, y: y(v) + 4, "text-anchor": "end" }, gbp(v)));
   }
-  snapshots.forEach((s, i) => svg.append(el("text", { svg: 1, x: x(i), y: height - 8, "text-anchor": "middle" }, monthLabel(s.monthEnd))));
+  return y;
+}
+
+/** Month labels along the bottom of a chart, with "so far" under the current month. */
+function monthLabels(svg, months, height) {
+  const x = monthX(months.length);
+  months.forEach((month, i) => {
+    const label = el("text", { svg: 1, x: x(i), y: height - 22, "text-anchor": "middle" }, monthLabel(month.monthEnd));
+    if (month.partial) label.append(el("tspan", { svg: 1, x: x(i), dy: 14 }, "so far"));
+    svg.append(label);
+  });
+}
+
+/**
+ * Shades the selected month's band on a chart, and selects the month whose band is clicked. Called before the chart
+ * draws its marks, so the shading sits behind them.
+ */
+function selectableMonths(svg, months, top, bottom) {
+  const x = monthX(months.length), band = monthBand(months.length);
+  const shades = months.map((_, i) => el("rect", { svg: 1, class: "month-band", x: x(i) - band / 2, y: top, width: band, height: bottom - top }));
+  svg.append(...shades);
+  svg.classList.add("months");
+  svg.addEventListener("click", (event) => {
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
+    const i = Math.floor((point.x - CHART_LEFT) / band);
+    if (i >= 0 && i < months.length) monthSelection.select(months[i].monthEnd);
+  });
+  monthSelection.follow((selected) =>
+    months.forEach((month, i) => shades[i].setAttribute("visibility", month.monthEnd === selected ? "visible" : "hidden")),
+  );
+}
+
+function chart(snapshots, months) {
+  const height = 360, top = 10, bottom = height - 40;
+  const svg = el("svg", { viewBox: `0 0 ${CHART_WIDTH} ${height}`, role: "img", "aria-label": "Net Worth, total Assets and total Liabilities at each month end" });
+  selectableMonths(svg, months, top, bottom);
+  const y = valueAxis(svg, snapshots.flatMap((s) => SERIES.map(({ key }) => s[key])), top, bottom);
+  monthLabels(svg, months, height);
+  const x = monthX(snapshots.length);
   // Drawn in reverse so the Net Worth line sits on top.
   for (const { key, label } of [...SERIES].reverse()) {
     svg.append(el("polyline", { svg: 1, class: key, points: snapshots.map((s, i) => `${x(i)},${y(s[key])}`).join(" ") }));
@@ -111,6 +188,47 @@ function chart(snapshots) {
 function niceStep(raw) {
   const magnitude = 10 ** Math.floor(Math.log10(raw));
   return [1, 2, 5, 10].map((m) => m * magnitude).find((s) => s >= raw);
+}
+
+/** Spending per month as one bar stacked by Spending Category, then Uncategorised, on the Net Worth chart's month axis. */
+function spendingChart(months, categories) {
+  const series = [
+    ...categories
+      .filter((category) => category.kind === "Spending")
+      .map((category, i) => ({ className: `category-${i % 8}`, label: category.name, pence: (m) => m.spending.categories[i].total })),
+    { className: "uncategorised", label: "Uncategorised", pence: (m) => m.spending.uncategorised },
+  ];
+  // A Category whose Refunds outweigh its Spending in a month stacks below zero.
+  const stacks = months.map((month) => {
+    let up = 0, down = 0;
+    return series.map(({ pence }) => {
+      const p = pence(month);
+      if (p >= 0) return { pence: p, low: up, high: (up += p) };
+      return { pence: p, low: (down += p), high: down - p };
+    });
+  });
+  const height = 260, top = 10, bottom = height - 40;
+  const svg = el("svg", { viewBox: `0 0 ${CHART_WIDTH} ${height}`, role: "img", "aria-label": "Spending by Category in each month" });
+  selectableMonths(svg, months, top, bottom);
+  const y = valueAxis(svg, stacks.flat().flatMap(({ low, high }) => [low, high]), top, bottom);
+  monthLabels(svg, months, height);
+  const x = monthX(months.length), barWidth = monthBand(months.length) * 0.6;
+  months.forEach((month, i) =>
+    stacks[i].forEach(({ pence, low, high }, j) => {
+      if (pence === 0) return;
+      const { className, label } = series[j];
+      const segment = el("rect", {
+        svg: 1,
+        class: `segment ${className}${month.partial ? " partial" : ""}`,
+        x: x(i) - barWidth / 2, y: y(high), width: barWidth, height: y(low) - y(high),
+      });
+      segment.append(el("title", { svg: 1 }, `${label}, ${monthHeading(month)}: ${gbp(pence)}`));
+      svg.append(segment);
+    }),
+  );
+  const section = el("div");
+  section.append(el("h2", {}, "Spending by month"), legend(series.map(({ className, label }) => [className, label]), true), svg);
+  return section;
 }
 
 /** A table's header row, from [label, className] pairs. */
@@ -184,19 +302,33 @@ function figureButton(text, title, transactions, adds, panel) {
 function monthTable(heading, months, rows, adds) {
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table", { class: "months" });
+  // Each month's cells, its header first, so the selected month's column can be shaded.
+  const columns = months.map(() => []);
+  const monthButtons = months.map((month) => {
+    const button = el("button", { class: "month", type: "button", "aria-pressed": "false" }, monthHeading(month));
+    button.addEventListener("click", () => monthSelection.select(month.monthEnd));
+    return button;
+  });
   const head = el("tr");
   head.append(el("th", {}, heading));
-  for (const month of months) head.append(el("th", { class: "balance" }, monthHeading(month)));
+  monthButtons.forEach((button, i) => {
+    const th = el("th", { class: "balance" });
+    th.append(button);
+    head.append(th);
+    columns[i].push(th);
+  });
   table.append(head);
   const figureRow = ({ label, pence, transactions, className }, labelCell) => {
     const row = el("tr", className ? { class: className } : {});
     row.append(labelCell ?? el("td", {}, label));
-    for (const month of months) {
+    months.forEach((month, i) => {
       const cell = el("td", { class: "balance" });
       const text = gbp(pence(month));
       cell.append(transactions ? figureButton(text, `${label}, ${monthHeading(month)}: ${text}`, transactions(month), adds, panel) : text);
+      cell.addEventListener("click", () => monthSelection.select(month.monthEnd));
       row.append(cell);
-    }
+      columns[i].push(cell);
+    });
     return row;
   };
   for (const figure of rows) {
@@ -218,9 +350,25 @@ function monthTable(heading, months, rows, adds) {
   }
   const scroll = el("div", { class: "scroll" });
   scroll.append(table);
+  monthSelection.follow((selected) =>
+    months.forEach((month, i) => {
+      const isSelected = month.monthEnd === selected;
+      for (const cell of columns[i]) cell.classList.toggle("selected", isSelected);
+      monthButtons[i].setAttribute("aria-pressed", String(isSelected));
+      // After layout, since on the first render the table is not on the page yet.
+      if (isSelected) requestAnimationFrame(() => revealColumn(scroll, columns[i][0]));
+    }),
+  );
   const section = el("div");
   section.append(scroll, panel);
   return section;
+}
+
+/** Scrolls a table sideways just enough to show a column, clear of the sticky first column. */
+function revealColumn(scroll, th) {
+  const sticky = th.parentElement.firstElementChild.offsetWidth;
+  if (th.offsetLeft < scroll.scrollLeft + sticky) scroll.scrollLeft = th.offsetLeft - sticky;
+  else if (th.offsetLeft + th.offsetWidth > scroll.scrollLeft + scroll.clientWidth) scroll.scrollLeft = th.offsetLeft + th.offsetWidth - scroll.clientWidth;
 }
 
 /** Every Transaction behind a month's Spending or Earnings. */
@@ -328,7 +476,17 @@ async function render() {
     content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
     content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
-  content.append(legend(), chart(report.snapshots), el("h2", {}, "Accounts"), accountTable(report.accounts), spendingSection(report.spending));
+  // Both calculators give the same months, from Tracking Start through the current one. The latest full month starts selected.
+  const { months, categories } = report.spending;
+  monthSelection.select((months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
+  content.append(
+    legend(SERIES.map(({ key, label }) => [key, label])),
+    chart(report.snapshots, months),
+    spendingChart(months, categories),
+    el("h2", {}, "Accounts"),
+    accountTable(report.accounts),
+    spendingSection(report.spending),
+  );
 }
 render();
 </script>
