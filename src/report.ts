@@ -15,6 +15,8 @@ export type ReportInput = {
   rulesFile: { path: string; found: boolean };
   trackingStart: YearMonth;
   today: IsoDate;
+  /** Whether `ANTHROPIC_API_KEY` is set, so Suggested Rules can be asked for. Never the key itself. */
+  apiKeySet: boolean;
 };
 
 /**
@@ -31,7 +33,8 @@ export type NetWorthChange = { since: IsoDate; change: Pence; net: Pence; otherC
 
 /**
  * Everything the page shows: each month from Tracking Start through today, each Account's latest Balance, the
- * Uncategorised Transactions, and the rules file's Categories to make rules with.
+ * Uncategorised Transactions, the rules file's Categories to make rules with, and whether Suggested Rules can be asked
+ * for.
  */
 export type Report = {
   months: ReportMonth[];
@@ -39,6 +42,7 @@ export type Report = {
   uncategorised: UncategorisedDescription[];
   categories: Category[];
   rulesFile: ReportInput["rulesFile"];
+  apiKeySet: boolean;
 };
 
 /** What the page receives: the Report, or why it can't be shown. */
@@ -48,10 +52,10 @@ export type ReportResponse = Report | { error: string };
 export async function statementsReport(settings: Settings): Promise<Report> {
   const statements = await scanStatements(settings.dataFolder);
   const { categories, rules, path, found } = await loadRules(settings.dataFolder);
-  return buildReport({ statements, categories, rules, rulesFile: { path, found }, trackingStart: settings.trackingStart, today: localToday() });
+  return buildReport({ statements, categories, rules, rulesFile: { path, found }, trackingStart: settings.trackingStart, today: localToday(), apiKeySet: Boolean(process.env.ANTHROPIC_API_KEY) });
 }
 
-export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today }: ReportInput): Report {
+export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today, apiKeySet }: ReportInput): Report {
   const monthEnds = monthEndsFrom(trackingStart, today);
   const { snapshots, accounts } = calculateNetWorth({ balances, monthEnds, today });
   const spending = calculateSpending({ transactions, categories, rules, monthEnds, today });
@@ -61,7 +65,7 @@ export function buildReport({ statements: { balances, transactions }, categories
     const before = snapshots[i - 1];
     return { ...month, snapshot, netWorthChange: before && netWorthChange(before, snapshot, month.net) };
   });
-  return { months, accounts, uncategorised: spending.uncategorised, categories, rulesFile };
+  return { months, accounts, uncategorised: spending.uncategorised, categories, rulesFile, apiKeySet };
 }
 
 function netWorthChange(before: MonthEndSnapshot, after: MonthEndSnapshot, net: Pence): NetWorthChange {

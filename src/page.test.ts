@@ -9,12 +9,17 @@ import { madeUpTracker } from "./tools/madeUpReport.js";
 /** Each row of a month table, as its cells' text. */
 const rows = (table: Element) => [...(table as HTMLTableElement).rows].map((row) => [...row.cells].map((cell) => cell.textContent!.trim()));
 
-beforeAll(async () => {
+/** Every URL the page fetched, in order. */
+const fetched: string[] = [];
+
+/** Shows the page as the server does, with the made-up Report, saving rules into the made-up rules file in memory. */
+async function showPage(options?: Parameters<typeof madeUpTracker>[0]) {
   const page = readFileSync(join(import.meta.dirname, "page.html"), "utf8");
   document.body.innerHTML = /<main>[\s\S]*<\/main>/.exec(page)![0];
-  // Serves the page as the server does, saving rules into the made-up rules file in memory.
-  const tracker = madeUpTracker();
+  const tracker = madeUpTracker(options);
+  fetched.length = 0;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    fetched.push(url);
     if (url === "/rules") {
       const body = await tracker.saveRule(JSON.parse(init!.body as string)).then(
         () => ({ saved: true }),
@@ -25,13 +30,16 @@ beforeAll(async () => {
     const report = await tracker.report();
     return { json: async () => report };
   });
+  vi.resetModules();
   await import("./page.js");
   await vi.waitFor(() => expect(document.querySelector(".latest")).not.toBeNull());
-});
+}
+
+beforeAll(() => showPage());
 
 describe("the page", () => {
   it("shows the latest Month-End Snapshot's Net Worth", () => {
-    expect(document.querySelector(".latest")!.textContent).toBe("£40,125.76");
+    expect(document.querySelector(".latest")!.textContent).toBe("£40,116.76");
   });
 
   it("lists every Spending Category and Subcategory, Uncategorised and the total, one column per month", () => {
@@ -80,7 +88,7 @@ describe("making a rule from an Uncategorised row", () => {
   };
 
   it("opens a form with the row's description as editable \"contains\" text", () => {
-    expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]);
+    expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]);
     const form = makeRule("MYSTERY MERCHANT LTD");
     expect(contains(form).value).toBe("MYSTERY MERCHANT LTD");
   });
@@ -118,8 +126,49 @@ describe("making a rule from an Uncategorised row", () => {
     const select = choice(form);
     select.value = [...select.options].find((option) => option.textContent === "Fun › Holidays")!.value;
     form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
-    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND"]));
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
     const [spending] = document.querySelectorAll("table.months");
-    expect(rows(spending!).find(([label]) => label === "Uncategorised")!.slice(1, 7)).toEqual(Array(6).fill("£0.00"));
+    expect(rows(spending!).find(([label]) => label === "Uncategorised")!.slice(1, 7)).toEqual(["£0.00", "£0.00", "£0.00", "£9.00", "£0.00", "£0.00"]);
+  });
+});
+
+const suggest = () => document.querySelector(".suggest-rules")!;
+const suggestButton = () => [...suggest().querySelectorAll("button")].find((b) => b.textContent === "Suggest rules")!;
+
+describe("the about-to-send list for Suggested Rules", () => {
+  const tickboxes = () => [...suggest().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+
+  beforeAll(() => showPage({ apiKeySet: true }));
+
+  it("lists each distinct Uncategorised description once, masked exactly as it would be sent, with its direction, and no Transfers", () => {
+    expect(rows(suggest().querySelector("table")!).slice(1).map(([, description, direction]) => [description, direction])).toEqual([
+      ["MYSTERY MERCHANT LTD", "Money out"],
+      ["PAYMENT FROM A FRIEND", "Money in"],
+      ["CITY PARKING ####", "Money out"],
+    ]);
+    expect(suggest().textContent).not.toContain("THANK YOU");
+  });
+
+  it("starts with every row ticked", () => {
+    expect(tickboxes().map((box) => box.checked)).toEqual([true, true, true]);
+  });
+
+  it("sends nothing when Suggest rules is pressed, and says how many ticked rows would go", () => {
+    expect(suggestButton().disabled).toBe(false);
+    tickboxes()[1]!.click();
+    suggestButton().click();
+    expect(suggest().querySelector(".sent")!.textContent).toBe("Would send 2 descriptions, but asking Claude isn't built yet, so nothing was sent.");
+    expect(fetched).toEqual(["/report"]);
+  });
+});
+
+describe("Suggest rules without an API key", () => {
+  beforeAll(() => showPage({ apiKeySet: false }));
+
+  it("disables the button and explains how to set a key", () => {
+    expect(suggestButton().disabled).toBe(true);
+    expect(suggest().querySelector(".no-key")!.textContent).toBe(
+      "To ask Claude, set ANTHROPIC_API_KEY in the shell that runs npm start, then start the tracker again. Everything else works without it.",
+    );
   });
 });

@@ -5,6 +5,7 @@ import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
 import type { SaveResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
+import { suggestionRequest, type SentDescription } from "./suggestions.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
 const dayLabel = (iso: IsoDate) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -471,7 +472,8 @@ function rulesFileNote({ path, found }: Report["rulesFile"]) {
  * Uncategorised descriptions, largest total first, each listing its Transactions when clicked, and each with a form to
  * make a Categorisation Rule from it.
  */
-function uncategorisedList({ uncategorised, categories }: Report) {
+function uncategorisedList(report: Report) {
+  const { uncategorised, categories } = report;
   const section = el("div", { class: "uncategorised-list" });
   section.append(el("h2", {}, "Uncategorised"));
   if (uncategorised.length === 0) {
@@ -498,7 +500,43 @@ function uncategorisedList({ uncategorised, categories }: Report) {
     row.append(el("td", { class: "description" }, description), el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, action);
     table.append(row);
   }
-  section.append(scrolling(table), rulePanel, panel);
+  section.append(scrolling(table), rulePanel, panel, suggestRules(report));
+  return section;
+}
+
+/**
+ * The Suggest rules panel: exactly what asking Claude would send, each row with a tickbox, ticked to start, and the
+ * button, disabled when no API key is set. Pressing it sends nothing yet.
+ */
+function suggestRules({ uncategorised, apiKeySet }: Report) {
+  const section = el("div", { class: "suggest-rules" });
+  section.append(
+    el("h3", {}, "Suggest rules"),
+    el("div", { class: "muted" }, "Claude can suggest Categorisation Rules for these descriptions. Only this list would leave your Mac: each description once, with every run of 4 or more digits masked as ####, and whether money came in or went out. Untick any you'd rather not send."),
+  );
+  const unticked = new Set<SentDescription>();
+  const table = el("table");
+  table.append(headerRow([["Send"], ["Description"], ["Direction"]]));
+  for (const sent of suggestionRequest({ uncategorised, unticked: [] }).descriptions) {
+    const tick = el("input", { type: "checkbox", checked: "", "aria-label": `Send ${sent.description}` });
+    tick.addEventListener("change", () => (tick.checked ? unticked.delete(sent) : unticked.add(sent)));
+    const tickCell = el("td");
+    tickCell.append(tick);
+    const row = el("tr");
+    row.append(tickCell, el("td", {}, sent.description), el("td", {}, sent.direction === "Out" ? "Money out" : "Money in"));
+    table.append(row);
+  }
+  const button = el("button", { type: "button" }, "Suggest rules");
+  const sent = el("div", { class: "sent muted", "aria-live": "polite" });
+  button.addEventListener("click", () => {
+    const { descriptions } = suggestionRequest({ uncategorised, unticked: [...unticked] });
+    sent.textContent = `Would send ${descriptions.length} description${descriptions.length === 1 ? "" : "s"}, but asking Claude isn't built yet, so nothing was sent.`;
+  });
+  section.append(scrolling(table), button, sent);
+  if (!apiKeySet) {
+    button.disabled = true;
+    section.append(el("div", { class: "no-key muted" }, "To ask Claude, set ANTHROPIC_API_KEY in the shell that runs npm start, then start the tracker again. Everything else works without it."));
+  }
   return section;
 }
 

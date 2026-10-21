@@ -9,6 +9,7 @@ const PAGE = new URL("./page.html", import.meta.url);
 const SCRIPTS: Record<string, URL> = {
   "/page.js": new URL("./page.ts", import.meta.url),
   "/matching.js": new URL("./matching.ts", import.meta.url),
+  "/suggestions.js": new URL("./suggestions.ts", import.meta.url),
 };
 
 /** What the page can ask of the tracker: the Report, and saving one Categorisation Rule to the end of the rules file. */

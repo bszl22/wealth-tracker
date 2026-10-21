@@ -30,6 +30,7 @@ const report = ({ balances, transactions, today }: { balances: StatementBalance[
     rulesFile: { path: "rules.json", found: true },
     trackingStart: { year: 2026, month: 1 },
     today,
+    apiKeySet: false,
   });
 
 describe("buildReport", () => {

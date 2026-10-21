@@ -8,8 +8,9 @@ import type { AccountKind, Direction, IsoDate, Pence, StatementAccount } from ".
 
 // A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
-// July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, a one-off large
-// purchase in May, an investment fall in April, and a Stale Account.
+// July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, Uncategorised
+// descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, and a
+// Stale Account.
 
 const TODAY: IsoDate = "2026-07-12";
 const FULL_MONTHS = [1, 2, 3, 4, 5, 6];
@@ -72,6 +73,8 @@ add(CARD, day(5, 10), "SKY AIRLINES", 148000, "Out");
 add(CURRENT, day(2, 14), "MYSTERY MERCHANT LTD", 6700, "Out");
 add(CURRENT, day(5, 20), "MYSTERY MERCHANT LTD", 12900, "Out");
 add(CURRENT, day(3, 9), "PAYMENT FROM A FRIEND", 4500, "In");
+add(CURRENT, day(4, 12), "CITY PARKING 20417", 450, "Out");
+add(CURRENT, day(4, 26), "CITY PARKING 20988", 450, "Out");
 add(CURRENT, day(7, 1), "DD LANDLORD RENT", 125000, "Out");
 add(CARD, day(7, 4), "SUPERMARKET 0412", 6100, "Out");
 add(CARD, day(7, 8), "CORNER CAFE", 2700, "Out");
@@ -129,7 +132,7 @@ function madeUpReads(): StatementRead[] {
 }
 
 /** The made-up Report with the given Categories and rules. */
-function madeUpReportWith({ categories, rules }: Rules): Report {
+function madeUpReportWith({ categories, rules, apiKeySet }: Rules & { apiKeySet: boolean }): Report {
   return buildReport({
     statements: reconcileStatements(madeUpReads()),
     categories,
@@ -137,16 +140,20 @@ function madeUpReportWith({ categories, rules }: Rules): Report {
     rulesFile: { path: "Made-up Statements/rules.json", found: true },
     trackingStart: { year: 2026, month: 1 },
     today: TODAY,
+    apiKeySet,
   });
 }
 
-export const madeUpReport: Report = madeUpReportWith({ categories, rules });
+export const madeUpReport: Report = madeUpReportWith({ categories, rules, apiKeySet: true });
 
-/** The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. */
-export function madeUpTracker(): Tracker {
+/**
+ * The made-up Report, saving rules into a made-up rules file held in memory, so the data folder is never touched. It
+ * says an API key is set unless told otherwise, though none is ever read or used.
+ */
+export function madeUpTracker({ apiKeySet = true }: { apiKeySet?: boolean } = {}): Tracker {
   let contents = JSON.stringify({ categories, rules }, null, 2) + "\n";
   return {
-    report: async () => madeUpReportWith(readRules(contents)),
+    report: async () => madeUpReportWith({ ...readRules(contents), apiKeySet }),
     saveRule: async (rule) => {
       contents = withRule(contents, rule);
     },
