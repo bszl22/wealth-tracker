@@ -12,4 +12,4 @@ Not grilled first: these decisions were made during `/implement` and are recorde
 5. `check-statements` calls `readStatements` once, prints each read, then calls `reconcileStatements(reads)` for the Month-End Snapshots.
 6. Tests: the overlap tests (disagreeing Balances, one Balance per date, Transactions counted once) live in `scanStatements.test.ts`. `report.test.ts` builds its input through `reconcileStatements`.
 
-Left open: the calculators still take plain `Balance[]` and `Transaction[]`; only `buildReport` requires reconciled input.
+7. The calculators keep taking plain `Balance[]` and `Transaction[]`; only `buildReport` requires reconciled input by type. Requiring it of the calculators would push every calculator test through the overlap rules. `CODING_STANDARDS.md` › Reconciled input has the reviewer flag any other caller instead.
