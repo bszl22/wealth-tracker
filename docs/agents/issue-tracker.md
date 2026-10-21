@@ -30,6 +30,10 @@ GitHub shares one number space across issues and PRs, so a bare `#42` may be eit
 
 Create a GitHub issue.
 
+## When a design is agreed in conversation
+
+When a grilling session settles a design that will be built straight away, without `/to-spec`, publish the agreed design as an issue before building it, and end each commit that builds it with `Closes #<n>`. `/code-review` then finds its spec from the commits, and the reasons behind the change outlast the session.
+
 ## When a skill says "fetch the relevant ticket"
 
 Read it as in **Read an issue** above.

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/main.ts",
-    "made-up": "tsx src/tools/madeUpReport.ts",
+    "made-up": "tsx src/tools/serveMadeUpReport.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "statement-text": "tsx src/tools/statementText.ts",
@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "happy-dom": "20.14.5",
     "husky": "^9.1.7",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

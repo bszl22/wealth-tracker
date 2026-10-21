@@ -15,3 +15,7 @@ A reader lives in `src/readers/<institution>.ts`, exports one `read<Institution>
 - **Cross-checked**: a reader proves it read the whole Statement by checking its figures against each other, such as each Running Balance following from the one before, the last matching the Closing Balance, or summary rows adding up to a printed total. It fails rather than guessing when they disagree.
 - **Error messages** name what was missing or didn't add up in glossary terms, with no figures or descriptions from the Statement.
 - **Tests** run against made-up text in the Statement's extracted layout, with a comment saying every figure is invented. Failure tests are named "fails rather than guessing when …".
+
+## Pairing lists
+
+Pair two lists by name, such as a Category's name or a month end, unless one module builds both and promises their order. Pairing by position is fine under that promise: the producing module states the order in its doc comment ("one entry per given month end, in the order given") and a test there checks it, as `calculateSpending` does for its lines and `buildReport` does for its months. Flag a caller that pairs by position lists built in different places, such as the rules file's Categories against a Breakdown's, since a reorder on one side gives a wrong figure under a right label with no error.

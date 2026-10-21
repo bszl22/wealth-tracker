@@ -1,16 +1,14 @@
 import type { Balance } from "../netWorth.js";
 import type { Category, CategorisationRule } from "../rules.js";
-import { buildReport } from "../report.js";
-import { startServer } from "../server.js";
+import { buildReport, type Report } from "../report.js";
 import type { Transaction } from "../spending.js";
 import type { AccountKind, Direction, IsoDate, Pence } from "../statements.js";
 
-// Serves the page with a made-up report, for checking the page without the real Statements. Every Account,
-// description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
+// A made-up Report, for checking the page without the real Statements: served by serveMadeUpReport.ts and
+// rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
 // July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, a one-off large
 // purchase in May, an investment fall in April, and a Stale Account.
 
-const PORT = 4400;
 const TODAY: IsoDate = "2026-07-12";
 const FULL_MONTHS = [1, 2, 3, 4, 5, 6];
 
@@ -113,7 +111,7 @@ const balances: Balance[] = [
   closing("Old Easy Access", "2026-03-31", 120000),
 ];
 
-const report = buildReport({
+export const madeUpReport: Report = buildReport({
   balances,
   transactions,
   categories,
@@ -123,10 +121,3 @@ const report = buildReport({
   today: TODAY,
 });
 
-try {
-  await startServer(async () => report, PORT);
-  console.log(`Wealth Tracker, with a made-up report, is running at http://127.0.0.1:${PORT}/`);
-} catch (error) {
-  console.error((error as Error).message);
-  process.exitCode = 1;
-}
