@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { stripTypeScriptTypes } from "node:module";
 import type { Report, ReportResponse } from "./report.js";
+import { ruleToSave, type RuleToSave } from "./rules.js";
 import type { SentDescription, SuggestedRule } from "./suggestions.js";
 
 const PAGE = new URL("./page.html", import.meta.url);
@@ -9,7 +10,7 @@ const PAGE = new URL("./page.html", import.meta.url);
 /** The page's scripts, sent with the types stripped. Each imports only types from anything not listed here. */
 const SCRIPTS: Record<string, URL> = {
   "/page.js": new URL("./page.ts", import.meta.url),
-  "/matching.js": new URL("./matching.ts", import.meta.url),
+  "/rules.js": new URL("./rules.ts", import.meta.url),
   "/suggestions.js": new URL("./suggestions.ts", import.meta.url),
 };
 
@@ -19,7 +20,7 @@ const SCRIPTS: Record<string, URL> = {
  */
 export type Tracker = {
   report: () => Promise<Report>;
-  saveRule: (rule: unknown) => Promise<void>;
+  saveRule: (rule: RuleToSave) => Promise<void>;
   suggestRules: (ticked: SentDescription[]) => Promise<SuggestedRule[]>;
 };
 
@@ -73,14 +74,14 @@ async function handleSave(request: IncomingMessage, tracker: Tracker, port: numb
   if (refusal) return { status: 403, body: { error: refusal } };
   const text = await bodyOf(request, MAX_RULE_CHARACTERS);
   if (text === undefined) return { status: 413, body: { error: "The rule to save is too long." } };
-  let rule: unknown;
+  let sent: unknown;
   try {
-    rule = JSON.parse(text);
+    sent = JSON.parse(text);
   } catch {
     return { status: 400, body: { error: "The rule to save isn't valid JSON." } };
   }
   try {
-    await tracker.saveRule(rule);
+    await tracker.saveRule(ruleToSave(sent));
     return { status: 200, body: { saved: true } };
   } catch (error) {
     return { status: 400, body: { error: (error as Error).message } };

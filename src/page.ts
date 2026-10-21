@@ -1,12 +1,11 @@
-import { previewRule, ruleMatches } from "./matching.js";
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import type { Category, CategoryKind, RuleToSave } from "./rules.js";
+import { directionOf, kindFor, kindOf, markedNew, previewRule, type Category, type CategoryKind, type RuleToSave } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 import type { Subscriptions } from "./subscriptions.js";
-import { aboutToSend, markedNew, type SentDescription, type SuggestedRule } from "./suggestions.js";
+import { aboutToSend, type SentDescription, type SuggestedRule } from "./suggestions.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
 const dayLabel = (iso: IsoDate) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -369,7 +368,7 @@ function whatChangedPanel(months: ReportMonth[]) {
       for (const { kind, category, subcategory, pence, average, change, transactions } of moved) {
         const name = `${category ? `${category} › ${subcategory}` : subcategory}${kind === "Earnings" ? " (Earnings)" : ""}`;
         const changeCell = el("td", { class: "balance" });
-        changeCell.append(figureButton(signed(change), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, kind === "Spending" ? "Out" : "In", panel));
+        changeCell.append(figureButton(signed(change), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, directionOf(kind), panel));
         const row = el("tr");
         row.append(el("td", {}, name), changeCell, el("td", { class: "balance" }, gbp(pence)), el("td", { class: "balance" }, gbp(average)));
         table.append(row);
@@ -487,7 +486,7 @@ function uncategorisedList(report: Report) {
   const table = el("table");
   table.append(headerRow([["Description"], ["Uncategorised"], ["Transactions", "balance"], ["Total", "balance"], [""]]));
   for (const { description, direction, pence, transactions } of uncategorised) {
-    const kind = direction === "Out" ? "Spending" : "Earnings";
+    const kind = kindOf(direction);
     const total = el("td", { class: "balance" });
     total.append(figureButton(gbp(pence), `${description}, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
     const make = el("button", { class: "make-rule", type: "button" }, "Make rule");
@@ -605,9 +604,9 @@ function suggestedList({ uncategorised, categories }: Report, changed: () => voi
     });
     const edit = el("button", { type: "button" }, "Edit");
     edit.addEventListener("click", () => {
-      const direction = uncategorised.find(({ description }) => ruleMatches(rule.contains, description))?.direction ?? "Out";
+      // A Suggested Rule has no row of its own, so one catching nothing starts a new Category as Spending, the usual case.
       rulePanel.replaceChildren(
-        ruleForm(rule.contains, direction, uncategorised, categories, () => rulePanel.replaceChildren(), { suggested: rule, saved: discard }),
+        ruleForm(rule.contains, "Out", uncategorised, categories, () => rulePanel.replaceChildren(), { suggested: rule, saved: discard }),
       );
       contains(rulePanel).focus();
     });
@@ -660,17 +659,17 @@ function labelled(text: string, field: HTMLElement) {
 
 /**
  * A rule form's fields for adding a name: the choices "New Subcategory…" of a chosen existing Category (offered only
- * when there are Categories) and "New Category…" with its kind, starting as Spending for money out (`direction`) and
- * Earnings for money in, and one Subcategory. Shows only the fields the chosen choice needs, fills them from a
- * Suggested Rule's new name, and says which name is still missing before saving.
+ * when there are Categories) and "New Category…" with its kind, starting as `startingKind`, and one Subcategory. Shows
+ * only the fields the chosen choice needs, fills them from a Suggested Rule's new name, and says which name is still
+ * missing before saving.
  */
-function newNameFields(direction: Direction, categories: Category[]) {
+function newNameFields(startingKind: CategoryKind, categories: Category[]) {
   const parent = el("select", { name: "parent" });
   categories.forEach(({ name }) => parent.append(el("option", { value: name }, name)));
   const newCategory = el("input", { name: "category", type: "text", autocomplete: "off" });
   const kind = el("select", { name: "kind" });
   (["Spending", "Earnings"] satisfies CategoryKind[]).forEach((k) => kind.append(el("option", { value: k }, k)));
-  kind.value = direction === "Out" ? "Spending" : "Earnings";
+  kind.value = startingKind;
   const newSubcategory = el("input", { name: "subcategory", type: "text", autocomplete: "off" });
   const categoryName = () => newCategory.value.trim();
   const subcategoryName = () => newSubcategory.value.trim();
@@ -719,9 +718,11 @@ function newNameFields(direction: Direction, categories: Category[]) {
 
 /**
  * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
- * Transfer, or a new name from `newNameFields`. While the text is edited it shows what the rule would catch. Saving
- * adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again. Given a Suggested
- * Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving approves it.
+ * Transfer, or a new name from `newNameFields`. A new Category's kind starts as `kindFor` gives it, falling back to
+ * `direction`, that of the row the form was started from. While the text is edited it shows what the rule would
+ * catch. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again.
+ * Given a Suggested Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving
+ * approves it.
  */
 function ruleForm(
   description: string,
@@ -731,7 +732,7 @@ function ruleForm(
   close: () => void,
   edit?: { suggested: SuggestedRule; saved: () => void },
 ) {
-  const newName = newNameFields(direction, categories);
+  const newName = newNameFields(kindFor(description, uncategorised, direction), categories);
   const choices: Then[] = [
     ...categories.flatMap(({ name, subcategories }) =>
       subcategories.map((subcategory): Then => ({ label: `${name} › ${subcategory}`, rule: (contains) => ({ contains, category: name, subcategory }) })),

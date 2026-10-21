@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { ruleToSave } from "./rules.js";
 import type { SuggestionRequest } from "./suggestions.js";
 import { madeUpClaude, madeUpTracker } from "./tools/madeUpReport.js";
 
@@ -22,7 +23,9 @@ async function showPage(options?: Parameters<typeof madeUpTracker>[0]) {
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     fetched.push(url);
     if (url === "/rules") {
-      const body = await tracker.saveRule(JSON.parse(init!.body as string)).then(
+      // As the server does, checking the rule before saving it.
+      const save = async () => tracker.saveRule(ruleToSave(JSON.parse(init!.body as string)));
+      const body = await save().then(
         () => ({ saved: true }),
         (error: Error) => ({ error: error.message }),
       );

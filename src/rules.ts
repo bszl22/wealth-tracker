@@ -1,5 +1,9 @@
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import type { UncategorisedDescription } from "./spending.js";
+import type { Direction, Pence } from "./statements.js";
+
+// What a Categorisation Rule means: what it matches, which rule wins, the Categories it names, and whether one can be
+// added to the rules file. It imports only types, so the server can send it to the page with the types stripped.
+// Reading and writing the rules file is up to rulesFile.ts.
 
 export type CategoryKind = "Spending" | "Earnings";
 
@@ -10,49 +14,11 @@ export type CategorisationRule = { contains: string } & ({ category: string; sub
 
 export type Rules = { categories: Category[]; rules: CategorisationRule[] };
 
+/** Whether two Category or Subcategory names are the same, ignoring case and surrounding spaces. */
+export const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 /** The rules file, at the top of the data folder. The tracker reads it, and writes it only to save a rule made on the page (ADR 0001). */
 export const RULES_FILE = "rules.json";
-
-/** The rules file's Categories and rules, where it is, and whether it was there to read. */
-export type LoadedRules = Rules & { path: string; found: boolean };
-
-/** Reads the rules file at the top of the data folder. A missing file means no rules. */
-export async function loadRules(dataFolder: string): Promise<LoadedRules> {
-  const path = join(dataFolder, RULES_FILE);
-  const contents = await rulesFileContents(path);
-  return { ...readRules(contents), path, found: contents !== undefined };
-}
-
-async function rulesFileContents(path: string): Promise<string | undefined> {
-  return readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return undefined;
-    throw new Error(`${RULES_FILE} in the data folder can't be opened`);
-  });
-}
-
-/** The save in progress, so saves made together each add their rule to the file the one before wrote. */
-let saving: Promise<unknown> = Promise.resolve();
-
-/**
- * Rereads the rules file and saves it with `rule` added to the end, creating it if there is none. Writes a temporary
- * file in the data folder and renames it over the rules file, so the rules file is never left half-written.
- */
-export function saveRule(dataFolder: string, rule: unknown): Promise<void> {
-  const save = saving.then(async () => {
-    const path = join(dataFolder, RULES_FILE);
-    const updated = withRule(await rulesFileContents(path), rule);
-    const temporary = `${path}.saving`;
-    try {
-      await writeFile(temporary, updated, "utf8");
-      await rename(temporary, path);
-    } catch {
-      await rm(temporary, { force: true });
-      throw new Error(`${RULES_FILE} in the data folder can't be written, so the rule wasn't saved`);
-    }
-  });
-  saving = save.catch(() => undefined);
-  return save;
-}
 
 /** Reads a rules file's contents into its Categories and its Categorisation Rules in order. With no rules file, there are none. */
 export function readRules(contents: string | undefined): Rules {
@@ -72,7 +38,7 @@ export function readRules(contents: string | undefined): Rules {
   const categories: Category[] = [];
   for (const category of file.categories) {
     const checked = checkedCategory(category);
-    if (categories.some((c) => c.name === checked.name)) {
+    if (categories.some((c) => sameName(c.name, checked.name))) {
       throw new Error(`${RULES_FILE} has a Category named the same as one before it: ${JSON.stringify(category)}`);
     }
     categories.push(checked);
@@ -87,7 +53,7 @@ function checkedCategory(category: unknown): Category {
   if (!isText(name) || !Array.isArray(subcategories) || !subcategories.every(isText)) {
     throw fail('without a "name" and a "subcategories" list');
   }
-  if (new Set(subcategories).size !== subcategories.length) throw fail("listing a Subcategory twice");
+  if (subcategories.some((s, i) => subcategories.findIndex((t) => sameName(s, t)) !== i)) throw fail("listing a Subcategory twice");
   if (kind !== "Spending" && kind !== "Earnings") throw fail('whose "kind" is not "Spending" or "Earnings"');
   return { name, kind, subcategories };
 }
@@ -117,12 +83,38 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
 export type RuleToSave = CategorisationRule & { adds?: { new: "Category"; kind: CategoryKind } | { new: "Subcategory" } };
 
 /**
- * A rules file's contents with `rule` (a `RuleToSave`) added to the end of its rules, and any new Category added after
- * the others or new Subcategory added to the end of its Category's, as 2-space JSON, leaving everything else unchanged
- * and in order. Fails, quoting nothing from the file, when the file or the rule doesn't read cleanly, and refuses a new
- * Category or Subcategory named the same as an existing one.
+ * A rule sent to be saved, checked: its "contains" text as typed, its Category and Subcategory names trimmed, or marked
+ * as a Transfer, and anything else left out. Fails saying what is wrong with it.
  */
-export function withRule(contents: string | undefined, rule: unknown): string {
+export function ruleToSave(rule: unknown): RuleToSave {
+  const { contains, transfer, category, subcategory, adds } = fieldsOf(rule);
+  if (typeof contains !== "string" || contains.trim() === "") throw new Error('The rule has no "contains" text to look for, so it wasn\'t saved.');
+  if (transfer === true) return { contains, transfer };
+  if (transfer !== undefined) throw new Error('The rule\'s "transfer" can only be true, so it wasn\'t saved.');
+  const trimmed = (name: unknown) => (typeof name === "string" ? name.trim() : "");
+  const named = { contains, category: trimmed(category), subcategory: trimmed(subcategory) };
+  const { new: adding, kind } = fieldsOf(adds);
+  if (adds !== undefined) {
+    if (adding !== "Category" && adding !== "Subcategory") throw new Error("The rule can only add a new Category or a new Subcategory, so it wasn't saved.");
+    if (adding === "Category" && kind !== "Spending" && kind !== "Earnings") throw new Error("A new Category needs its kind, Spending or Earnings, so the rule wasn't saved.");
+    if (named[adding === "Category" ? "category" : "subcategory"] === "") throw new Error(`The new ${adding} needs a name, so the rule wasn't saved.`);
+  }
+  if (named.category === "" || named.subcategory === "") throw new Error("The rule needs a Category and Subcategory, or to be a Transfer, so it wasn't saved.");
+  if (adds === undefined) return named;
+  return { ...named, adds: adding === "Category" ? { new: "Category", kind: kind as CategoryKind } : { new: "Subcategory" } };
+}
+
+/** The fields of what was sent, or none when it isn't an object. */
+const fieldsOf = (sent: unknown) => (typeof sent === "object" && sent !== null ? sent : {}) as Record<string, unknown>;
+
+/**
+ * A rules file's contents with `rule` added to the end of its rules, naming any existing Category and Subcategory as the
+ * file spells them, and any new Category added after the others or new Subcategory added to the end of its Category's,
+ * as 2-space JSON, leaving everything else unchanged and in order. Fails, quoting nothing from the file, when the file
+ * doesn't read cleanly or wouldn't with the rule added, and refuses a new Category or Subcategory named the same as an
+ * existing one.
+ */
+export function withRule(contents: string | undefined, rule: RuleToSave): string {
   try {
     readRules(contents);
   } catch {
@@ -130,12 +122,9 @@ export function withRule(contents: string | undefined, rule: unknown): string {
     throw new Error(`${RULES_FILE} doesn't read cleanly, so the rule wasn't saved. Fix ${RULES_FILE}, then reload the page to see the problem.`);
   }
   const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { categories: Category[]; rules: unknown[] });
-  const { contains, transfer, adds, ...named } = (rule ?? {}) as Record<string, unknown>;
-  // A new name is saved without its surrounding spaces, and the rule names it the same way.
-  const trimmed = (name: unknown) => (adds !== undefined && typeof name === "string" ? name.trim() : name);
-  const [category, subcategory] = [trimmed(named.category), trimmed(named.subcategory)];
-  const added = transfer === true ? { contains, transfer } : { contains, category, subcategory };
-  const categories = transfer === true || adds === undefined ? file.categories : withAddition(file.categories, category, subcategory, adds);
+  const { adds, ...named } = rule;
+  const added = "transfer" in named ? named : { ...named, ...spelledAsIn(file.categories, named, adds) };
+  const categories = "transfer" in added || adds === undefined ? file.categories : withAddition(file.categories, added, adds);
   const updated = JSON.stringify({ ...file, categories, rules: [...file.rules, added] }, null, 2) + "\n";
   try {
     readRules(updated);
@@ -145,25 +134,86 @@ export function withRule(contents: string | undefined, rule: unknown): string {
   return updated;
 }
 
+/** A rule's Category and Subcategory as the rules file spells them, leaving any it adds as named. */
+function spelledAsIn(categories: Category[], { category, subcategory }: { category: string; subcategory: string }, adds: RuleToSave["adds"]) {
+  const spelled = (names: string[], name: string) => names.find((existing) => sameName(existing, name)) ?? name;
+  const spelledCategory = adds?.new === "Category" ? category : spelled(categories.map(({ name }) => name), category);
+  const subcategories = categories.find(({ name }) => name === spelledCategory)?.subcategories ?? [];
+  return { category: spelledCategory, subcategory: adds ? subcategory : spelled(subcategories, subcategory) };
+}
+
 /**
  * The rules file's Categories with the rule's new Category, holding just its Subcategory, added after them, or its new
- * Subcategory added to the end of its Category's Subcategories. Refuses a new name the same as an existing one,
- * ignoring case.
+ * Subcategory added to the end of its Category's Subcategories. Refuses a new name the same as an existing one by
+ * `sameName`.
  */
-function withAddition(categories: Category[], category: unknown, subcategory: unknown, adds: unknown): Category[] {
-  const { new: adding, kind } = (adds ?? {}) as Record<string, unknown>;
-  // Adding nothing leaves the rule naming what isn't in the file, so the check after saving refuses it.
-  if (adding !== "Category" && adding !== "Subcategory") return categories;
-  const name = adding === "Category" ? category : subcategory;
-  if (name === "") throw new Error(`The new ${adding} needs a name, so the rule wasn't saved.`);
-  const same = (existing: string) => typeof name === "string" && existing.toLowerCase() === name.toLowerCase();
+function withAddition(categories: Category[], { category, subcategory }: { category: string; subcategory: string }, adds: NonNullable<RuleToSave["adds"]>): Category[] {
+  const name = adds.new === "Category" ? category : subcategory;
+  const same = (existing: string) => sameName(existing, name);
   const refuse = (existing: string) =>
-    new Error(`${existing} named "${name}", so the rule wasn't saved. Choose it from the list, or give the new ${adding} another name.`);
-  if (adding === "Category") {
+    new Error(`${existing} named "${name}", so the rule wasn't saved. Choose it from the list, or give the new ${adds.new} another name.`);
+  if (adds.new === "Category") {
     if (categories.some((c) => same(c.name))) throw refuse("There is already a Category");
-    return [...categories, { name: category, kind, subcategories: [subcategory] } as Category];
+    return [...categories, { name: category, kind: adds.kind, subcategories: [subcategory] }];
   }
   const existing = categories.find((c) => c.name === category);
   if (existing?.subcategories.some(same)) throw refuse(`${existing.name} already has a Subcategory`);
-  return categories.map((c) => (c.name === category ? { ...c, subcategories: [...c.subcategories, subcategory as string] } : c));
+  return categories.map((c) => (c.name === category ? { ...c, subcategories: [...c.subcategories, subcategory] } : c));
+}
+
+/** Whether a description contains a rule's "contains" text, ignoring case. Blank text matches nothing. */
+export function ruleMatches(contains: string, description: string): boolean {
+  return contains.trim() !== "" && description.toLowerCase().includes(contains.toLowerCase());
+}
+
+/** The first Categorisation Rule in the list matching a description, which is the one that wins, or none when it is Uncategorised. */
+export function categorise(rules: CategorisationRule[], { description }: { description: string }): CategorisationRule | undefined {
+  return rules.find((rule) => ruleMatches(rule.contains, description));
+}
+
+/** The direction money moves to add to a Category of this kind: out for Spending, in for Earnings. */
+export const directionOf = (kind: CategoryKind): Direction => (kind === "Spending" ? "Out" : "In");
+
+/** The kind of Category money moving this way adds to: Spending for money out, Earnings for money in. */
+export const kindOf = (direction: Direction): CategoryKind => (direction === "Out" ? "Spending" : "Earnings");
+
+/**
+ * A new Category's kind: Earnings when most of the Uncategorised descriptions its rule's `contains` text catches are
+ * money in, and Spending otherwise, or the kind of `fallback`, the direction of the row the rule was started from, when
+ * it catches none.
+ */
+export function kindFor(contains: string, uncategorised: UncategorisedDescription[], fallback: Direction): CategoryKind {
+  const caught = uncategorised.filter(({ description }) => ruleMatches(contains, description));
+  if (caught.length === 0) return kindOf(fallback);
+  const moneyIn = caught.filter(({ direction }) => direction === "In").length;
+  return moneyIn > caught.length - moneyIn ? "Earnings" : "Spending";
+}
+
+/**
+ * A rule marked against `categories`, which may have changed since it was made, such as a Suggested Rule after another
+ * is approved: naming a Category and Subcategory as the rules file spells them, and marked as adding its Category or
+ * Subcategory only when that isn't there. A new Category keeps the kind it was marked with, or follows `kindFor`.
+ */
+export function markedNew(rule: RuleToSave, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): RuleToSave {
+  if ("transfer" in rule) return rule;
+  const { contains, adds } = rule;
+  const category = categories.find(({ name }) => sameName(rule.category, name));
+  if (!category) {
+    // With no row it was started from, a rule catching nothing starts as Spending, the usual case.
+    const kind = adds?.new === "Category" ? adds.kind : kindFor(contains, uncategorised, "Out");
+    return { contains, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
+  }
+  const subcategory = category.subcategories.find((name) => sameName(rule.subcategory, name));
+  if (!subcategory) return { contains, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
+  return { contains, category: category.name, subcategory };
+}
+
+/** What a rule with this "contains" text would catch among the Uncategorised descriptions. */
+export type RulePreview = { descriptionCount: number; spending: Pence; earnings: Pence };
+
+/** How many Uncategorised descriptions a rule's "contains" text would catch, and their Spending and Earnings totals. */
+export function previewRule(contains: string, uncategorised: UncategorisedDescription[]): RulePreview {
+  const caught = uncategorised.filter(({ description }) => ruleMatches(contains, description));
+  const total = (direction: Direction) => caught.filter((d) => d.direction === direction).reduce((sum, d) => sum + d.pence, 0);
+  return { descriptionCount: caught.length, spending: total("Out"), earnings: total("In") };
 }

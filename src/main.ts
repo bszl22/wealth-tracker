@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { askClaude } from "./claude.js";
 import { statementsReport } from "./report.js";
-import { saveRule } from "./rules.js";
+import { saveRule } from "./rulesFile.js";
 import { startServer } from "./server.js";
 import { loadSettings } from "./settings.js";
 import { askForSuggestedRules } from "./suggestions.js";

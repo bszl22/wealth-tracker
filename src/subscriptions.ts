@@ -1,5 +1,5 @@
-import type { Category, CategorisationRule } from "./rules.js";
-import { firstMatch, type Transaction } from "./spending.js";
+import { categorise, type Category, type CategorisationRule } from "./rules.js";
+import type { Transaction } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 
 export type SubscriptionInterval = "Weekly" | "Monthly" | "Yearly";
@@ -42,7 +42,7 @@ export function findSubscriptions({ transactions, categories, rules, today }: Su
   const groups = new Map<CategorisationRule | string, { name: string; transactions: Transaction[] }>();
   for (const transaction of transactions) {
     if (transaction.direction !== "Out") continue;
-    const rule = firstMatch(rules, transaction);
+    const rule = categorise(rules, transaction);
     if (rule && !("category" in rule && spendingCategories.has(rule.category))) continue;
     const key = rule ?? transaction.description;
     const name = rule && "category" in rule ? `${rule.subcategory} (${rule.contains})` : transaction.description;

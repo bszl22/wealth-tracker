@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review for Wealth Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { border-style: dashed !important; }
+      .leak { color: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #e2e8f0; }
+      .label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+      .mermaid { display: flex; justify-content: center; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      <header class="space-y-3">
+        <h1 class="font-serif text-4xl">Wealth Tracker: deepening opportunities, round 2</h1>
+        <p class="text-sm text-slate-500">
+          21 Oct 2026 · scoped to the hot spots since the first review (all three of its candidates are built):
+          <code>page.ts</code>, <code>rules.ts</code>, <code>suggestions.ts</code>, <code>server.ts</code>, <code>tools/madeUpReport.ts</code>, <code>main.ts</code>
+        </p>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-600">
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border-2 border-slate-400 bg-white"></span>module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 border-2 border-slate-500 seam"></span>seam</span>
+          <span class="flex items-center gap-2"><span class="leak font-bold">→</span>leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-5 h-4 deep rounded-sm"></span>deep module</span>
+        </div>
+        <p class="text-xs text-slate-500">Not re-suggested: pairing Breakdown lines by position (allowed by CODING_STANDARDS › Pairing lists), calculators taking unbranded input (CODING_STANDARDS › Reconciled input), Transfers by rule (ADR 0004).</p>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+        <!-- ============ 1 ============ -->
+        <article id="c1" class="space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">1 · One Categorisation Rule module, shared by server and page</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/rules.ts: checkedRule (exact names), withRule, withAddition (case-insensitive, then exact parent lookup)</li>
+            <li>src/matching.ts: ruleMatches, previewRule (exists only to be sent to the browser)</li>
+            <li>src/spending.ts: firstMatch (imported by subscriptions.ts), kind ↔ direction</li>
+            <li>src/suggestions.ts: suggestedRules (trims), markedNew (case-insensitive), kindOf (majority direction)</li>
+            <li>src/page.ts: newNameFields (trims, kind from clicked row), Edit button (kind from first match), kind ↔ direction ×3</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-2">Before: one concept, six answers to the same questions</p>
+              <div class="grid grid-cols-3 gap-2 text-xs">
+                <div class="col-span-3 grid grid-cols-4 gap-1 font-semibold text-slate-500 label">
+                  <span></span><span>same name?</span><span>trim?</span><span>new Category kind</span>
+                </div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">checkedRule</span><span class="leak">exact</span><span>—</span><span>—</span></div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">withAddition</span><span class="leak">ignore case, then exact</span><span>if adds</span><span>given</span></div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">markedNew</span><span>ignore case</span><span>—</span><span>majority</span></div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">suggestedRules</span><span>—</span><span>yes</span><span>majority</span></div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">newNameFields</span><span>—</span><span>yes</span><span class="leak">clicked row</span></div>
+                <div class="col-span-3 grid grid-cols-4 gap-1 border-t pt-1"><span class="font-mono">Edit button</span><span>—</span><span>—</span><span class="leak">first match</span></div>
+              </div>
+              <p class="mt-3 text-xs text-slate-500">"Which rule wins" lives in <code>spending.ts</code>; "does it match" in <code>matching.ts</code>; Spending→Out written 4 times.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4 flex flex-col gap-3">
+              <p class="label text-slate-500">After: one deep module behind a small interface</p>
+              <div class="flex gap-2 text-xs justify-center">
+                <span class="rounded border border-slate-300 px-2 py-1">rules.ts (file IO only)</span>
+                <span class="rounded border border-slate-300 px-2 py-1">spending · subscriptions</span>
+                <span class="rounded border border-slate-300 px-2 py-1">suggestions</span>
+                <span class="rounded border border-slate-300 px-2 py-1">page</span>
+              </div>
+              <div class="text-center text-slate-400">↓ ↓ ↓ ↓</div>
+              <div class="deep rounded-lg p-4 border-4 border-slate-900 seam">
+                <p class="label text-slate-300 mb-2">Categorisation Rule module · browser-safe</p>
+                <div class="grid grid-cols-2 gap-1.5 text-xs text-slate-300/80">
+                  <span class="rounded bg-white/10 px-2 py-1">first match wins</span>
+                  <span class="rounded bg-white/10 px-2 py-1">"contains", ignoring case</span>
+                  <span class="rounded bg-white/10 px-2 py-1">name equality + trimming</span>
+                  <span class="rounded bg-white/10 px-2 py-1">is this Category new?</span>
+                  <span class="rounded bg-white/10 px-2 py-1">new Category's kind</span>
+                  <span class="rounded bg-white/10 px-2 py-1">kind ↔ direction</span>
+                  <span class="rounded bg-white/10 px-2 py-1 col-span-2">unknown → RuleToSave, with a specific reason</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> A Categorisation Rule's invariants are spread over five modules and the page, and they already disagree: a new Category's kind is decided three ways, and "is this name already there" is exact in one place and case-insensitive in another.</p>
+          <p><strong>Solution.</strong> One browser-safe module owns everything about a rule and the Categories it names; <code>rules.ts</code> shrinks to reading and writing the rules file, and spending, Subscriptions, Suggested Rules and the rule form all call the one module.</p>
+          <ul class="list-disc pl-6 text-sm space-y-1">
+            <li>Locality: rule invariants in one module</li>
+            <li>Leverage: server and page share one interface</li>
+            <li>Delete matching.ts as a pass-through</li>
+            <li>Bad <code>adds</code> gets a specific error</li>
+            <li>Tests hit rule behaviour without DOM</li>
+          </ul>
+        </article>
+
+        <!-- ============ 2 ============ -->
+        <article id="c2" class="space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">2 · One Tracker, with the made-up Report as an adapter</h2>
+            <span class="rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1">Strong</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">local-substitutable · ports &amp; adapters</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/main.ts: wires report, saveRule, suggestRules by hand</li>
+            <li>src/tools/madeUpReport.ts: madeUpTracker wires the same three again</li>
+            <li>src/report.ts: statementsReport reads process.env and the clock</li>
+            <li>src/rules.ts: saveRule (queue, temporary file, rename), untested</li>
+            <li>src/claude.ts: reads ANTHROPIC_API_KEY a second time</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-2">Before: two hand-wired Trackers; only the made-up one is tested</p>
+              <pre class="mermaid">
+flowchart TB
+  M[main.ts] --> SR[statementsReport]
+  M --> SV[rules.saveRule]
+  M --> AS1[askForSuggestedRules + full rescan]
+  F[madeUpTracker] --> BR[buildReport]
+  F --> WR[withRule in memory]
+  F --> AS2[askForSuggestedRules + rebuild]
+  SR -. env, clock .-> X((process))
+  T[page.test] --> F
+  classDef leak stroke:#dc2626,stroke-width:2px
+  class M,SV,X leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-2">After: one composition, two adapters per seam</p>
+              <pre class="mermaid">
+flowchart TB
+  subgraph Tracker module
+    direction TB
+    R[report] --- S[save rule] --- Q[suggest rules]
+  end
+  ST[[Statements: data folder / made-up reads]] -.-> R
+  RF[[rules file: data folder / memory]] -.-> S
+  CL[[Claude: askClaude / madeUpClaude]] -.-> Q
+  CK[[today, API key set]] -.-> R
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a
+  class R,S,Q deep
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The Tracker is composed twice, almost line for line, so the only composition tests reach is the made-up one; a wrong wire in <code>main.ts</code>, or the rules file's save queue and atomic rename, passes every test.</p>
+          <p><strong>Solution.</strong> A Tracker module built from its adapters (Statements source, rules file store, Claude, today and whether a key is set); <code>main.ts</code> passes the real ones, the made-up Report passes invented ones.</p>
+          <ul class="list-disc pl-6 text-sm space-y-1">
+            <li>Two adapters justify each seam</li>
+            <li>Locality: wiring lives in one module</li>
+            <li>Page tests exercise the real composition</li>
+            <li>Env and clock become inputs</li>
+            <li>Room to skip the rescan on suggest</li>
+          </ul>
+        </article>
+
+        <!-- ============ 3 ============ -->
+        <article id="c3" class="space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">3 · The page tests talk to the real HTTP adapter</h2>
+            <span class="rounded-full bg-amber-100 text-amber-800 text-xs font-semibold px-3 py-1">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">ports &amp; adapters</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/server.ts: startServer, handleSave, handleSuggest, SCRIPTS allow-list</li>
+            <li>src/server.test.ts: tests only postRefusal</li>
+            <li>src/page.test.ts: stubs fetch and re-routes /rules, /suggestions, /report itself</li>
+            <li>src/page.ts: post, saveRule, endpoint strings</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-3">Before: cross-section of a rule save</p>
+              <div class="space-y-1.5 text-xs">
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">page.ts · post("/rules")</div>
+                <div class="h-10 border-l-4 border-red-500 bg-red-50 px-3 flex items-center leak">page.test · its own copy of the routing and response shapes</div>
+                <div class="h-10 border-l-4 border-slate-300 bg-white px-3 flex items-center text-slate-400">server.ts · handleSave: 403 / 413 / 400 (never reached by tests)</div>
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">Tracker.saveRule</div>
+              </div>
+              <p class="mt-3 text-xs text-slate-500">A non-type import added to <code>suggestions.ts</code> breaks the page in the browser with no failing test.</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-3">After: one thick band</p>
+              <div class="space-y-1.5 text-xs">
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">page.ts · post("/rules")</div>
+                <div class="h-24 deep rounded px-3 flex flex-col justify-center">
+                  <span class="label text-slate-300">HTTP module</span>
+                  <span class="text-slate-300/80">request → status + JSON, refusals, body limits, served scripts</span>
+                </div>
+                <div class="h-10 border-l-4 border-slate-400 bg-slate-50 px-3 flex items-center">Tracker (made-up adapter in tests)</div>
+              </div>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> The page tests replace the HTTP adapter with a hand-written copy of its routing, so the real one's error codes, body limits and the "scripts import only types" rule go untested.</p>
+          <p><strong>Solution.</strong> Expose the server's request handling as a module that takes a request and gives a status and body; the page tests route <code>fetch</code> through it, and one test checks every served script's imports.</p>
+          <ul class="list-disc pl-6 text-sm space-y-1">
+            <li>Delete the duplicated routing stub</li>
+            <li>Interface is the test surface</li>
+            <li>Browser-import rule gets a test</li>
+          </ul>
+        </article>
+
+        <!-- ============ 4 ============ -->
+        <article id="c4" class="space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="font-serif text-2xl">4 · The Suggested Rule lifecycle out of page.ts's globals</h2>
+            <span class="rounded-full bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-1">Speculative</span>
+            <span class="rounded-full bg-slate-100 text-slate-700 text-xs px-3 py-1">in-process</span>
+          </div>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>src/page.ts: let suggested (509), monthSelection, render() on import, suggestedList re-marks on every render</li>
+            <li>src/page.test.ts: resetModules, dynamic import, shared beforeAll state per describe</li>
+          </ul>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-2">Before: state reassigned during render</p>
+              <pre class="mermaid">
+flowchart LR
+  B[Suggest button] --> G[(let suggested)]
+  L[suggestedList] -- reassigns while drawing --> G
+  A[Approve / Reject] --> G
+  A --> RR[global render]
+  RR --> L
+  classDef leak stroke:#dc2626,stroke-width:2px
+  class G,L leak
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="label text-slate-500 mb-2">After: a pending-suggestions module the DOM reads</p>
+              <pre class="mermaid">
+flowchart LR
+  B[Suggest button] --> P
+  A[Approve / Edit / Reject] --> P
+  P[Pending Suggested Rules<br/>suggest · approve · reject · against Report] --> V[DOM builders]
+  classDef deep fill:#0f172a,color:#e2e8f0,stroke:#0f172a
+  class P deep
+              </pre>
+            </div>
+          </div>
+          <p><strong>Problem.</strong> Which Suggested Rules are pending, and how they are re-marked when the Categories change, lives in module globals mutated mid-render, testable only by driving the DOM.</p>
+          <p><strong>Solution.</strong> A small module holds the pending Suggested Rules and their transitions; the page's DOM builders read it. Most of the gain arrives with candidate 1, so revisit after it.</p>
+          <ul class="list-disc pl-6 text-sm space-y-1">
+            <li>Lifecycle tests without happy-dom</li>
+            <li>No mutation during render</li>
+          </ul>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border-2 border-emerald-600 bg-white p-6 space-y-2">
+        <p class="label text-emerald-700">Top recommendation</p>
+        <h2 class="font-serif text-2xl"><a href="#c1" class="underline decoration-emerald-400">1 · One Categorisation Rule module</a></h2>
+        <p>It is where the code is changing fastest (Suggested Rules, new Categories, the rule form), and its copies already disagree, so each new feature adds another place to keep in step; deepening it also shrinks the page and gives candidate 4 most of its value for free.</p>
+      </section>
+    </main>
+  </body>
+</html>

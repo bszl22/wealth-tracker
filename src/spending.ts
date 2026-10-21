@@ -1,4 +1,4 @@
-import { ruleMatches } from "./matching.js";
+import { categorise, directionOf } from "./rules.js";
 import type { Category, CategorisationRule, CategoryKind } from "./rules.js";
 import type { Direction, IsoDate, Pence, StatementTransaction } from "./statements.js";
 
@@ -82,7 +82,7 @@ export function calculateSpending({ transactions, categories, rules, monthEnds, 
   const shown = new Set(monthEnds.map((monthEnd) => monthEnd.slice(0, 7)));
   const matched = transactions
     .filter(({ date }) => shown.has(date.slice(0, 7)))
-    .map((transaction): Matched => ({ transaction, rule: firstMatch(rules, transaction) }));
+    .map((transaction): Matched => ({ transaction, rule: categorise(rules, transaction) }));
   const months = monthEnds.map((monthEnd) => {
     const inMonth = matched.filter(({ transaction }) => transaction.date.slice(0, 7) === monthEnd.slice(0, 7));
     const spending = breakdown("Spending", categories, inMonth);
@@ -145,18 +145,13 @@ function rankedUncategorised(matched: Matched[]): UncategorisedDescription[] {
   return [...groups.values()].sort((a, b) => b.pence - a.pence);
 }
 
-/** The first Categorisation Rule in the list matching a Transaction's description, which is the one that wins. */
-export function firstMatch(rules: CategorisationRule[], { description }: Transaction): CategorisationRule | undefined {
-  return rules.find((rule) => ruleMatches(rule.contains, description));
-}
-
 /**
  * Spending or Earnings by the Categories of that kind. Under a Spending Category, money out is Spending and money in
  * is a Refund reducing it; under an Earnings Category, money in is Earnings and money out reduces it. What no rule
  * matches is Uncategorised: money out under Spending, money in under Earnings.
  */
 function breakdown(kind: CategoryKind, categories: Category[], matched: Matched[]): Breakdown {
-  const adds = kind === "Spending" ? "Out" : "In";
+  const adds = directionOf(kind);
   const signed = ({ transaction }: Matched) => (transaction.direction === adds ? transaction.pence : -transaction.pence);
   const totals = categories
     .filter((category) => category.kind === kind)

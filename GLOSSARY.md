@@ -65,7 +65,7 @@ Transactions that bring money in from someone else, such as salary or bank inter
 _Avoid_: Income, inflows
 
 **Category**:
-The top level of a two-level grouping, such as Food. Each Category is either a Spending Category or an Earnings Category, and contains Subcategories, such as Groceries or Eating Out.
+The top level of a two-level grouping, such as Food. Each Category is either a Spending Category or an Earnings Category, and contains Subcategories, such as Groceries or Eating Out. No two Categories, and no two Subcategories of one Category, share a name, ignoring case and surrounding spaces.
 _Avoid_: Tag, label
 
 **Categorisation Rule**:

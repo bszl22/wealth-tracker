@@ -1,5 +1,6 @@
 import { calculateNetWorth, type AccountBalance, type MonthEndSnapshot } from "./netWorth.js";
-import { loadRules, type Category, type CategorisationRule } from "./rules.js";
+import type { Category, CategorisationRule } from "./rules.js";
+import { loadRules } from "./rulesFile.js";
 import { scanStatements, type ReconciledStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
 import { calculateSpending, type SpendingMonth, type UncategorisedDescription } from "./spending.js";

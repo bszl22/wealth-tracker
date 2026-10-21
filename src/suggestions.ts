@@ -1,10 +1,9 @@
-import { ruleMatches } from "./matching.js";
-import type { Category, CategoryKind, RuleToSave } from "./rules.js";
+import { markedNew, ruleMatches, type Category, type RuleToSave } from "./rules.js";
 import type { UncategorisedDescription } from "./spending.js";
 import type { Direction } from "./statements.js";
 
 // What asking Claude for Suggested Rules sends, the one place data leaves the Mac (ADR 0003), and what comes back.
-// It imports only types and the matching the page already has, so the server can send it to the page, which shows
+// It imports only types and the rule module the page already has, so the server can send it to the page, which shows
 // exactly the about-to-send list.
 
 /** One description as it would be sent: masked, with whether money came in or went out, and nothing else. */
@@ -102,38 +101,12 @@ export function suggestedRules(text: string, { uncategorised, categories }: { un
   const trimmed = (text: unknown) => (typeof text === "string" ? text.trim() : "");
   return suggestions.flatMap(({ contains, transfer, category: named, subcategory: subcategoryNamed }): SuggestedRule[] => {
     if (typeof contains !== "string") return [];
-    const matched = uncategorised.filter(({ description }) => ruleMatches(contains, description));
-    if (matched.length === 0) return [];
+    if (!uncategorised.some(({ description }) => ruleMatches(contains, description))) return [];
     if (transfer === true) return [{ contains, transfer }];
     const [category, subcategory] = [trimmed(named), trimmed(subcategoryNamed)];
     if (category === "" || subcategory === "") return [];
-    return [markedNew({ contains, category, subcategory, adds: { new: "Category", kind: kindOf(matched) } }, { uncategorised, categories })];
+    return [markedNew({ contains, category, subcategory }, { uncategorised, categories })];
   });
-}
-
-/**
- * A Suggested Rule marked against `categories`, which may have changed since it was suggested: naming a Category and
- * Subcategory as the rules file does, and marked as adding its Category or Subcategory only when that isn't there. A
- * new Category keeps the kind it was suggested with, or follows the direction of the descriptions the rule matches.
- */
-export function markedNew(rule: SuggestedRule, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): SuggestedRule {
-  if ("transfer" in rule) return rule;
-  const { contains, adds } = rule;
-  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-  const category = categories.find((c) => same(rule.category, c.name));
-  if (!category) {
-    const kind = adds?.new === "Category" ? adds.kind : kindOf(uncategorised.filter(({ description }) => ruleMatches(contains, description)));
-    return { contains, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
-  }
-  const subcategory = category.subcategories.find((s) => same(rule.subcategory, s));
-  if (!subcategory) return { contains, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
-  return { contains, category: category.name, subcategory };
-}
-
-/** A new Category's kind: Earnings when most of the descriptions its rule matches are money in, and Spending otherwise. */
-function kindOf(matched: UncategorisedDescription[]): CategoryKind {
-  const moneyIn = matched.filter(({ direction }) => direction === "In").length;
-  return moneyIn > matched.length - moneyIn ? "Earnings" : "Spending";
 }
 
 /** Each suggestion in Claude's response, failing, quoting nothing from it, when it isn't a list of suggestions. */
