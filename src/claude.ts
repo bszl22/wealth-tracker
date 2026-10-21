@@ -10,10 +10,11 @@ const INSTRUCTIONS = `You suggest Categorisation Rules for a personal finance tr
 
 A Categorisation Rule matches every description containing its "contains" text, ignoring case. For each rule you suggest:
 - Choose "contains" text that appears in at least one of the descriptions, short enough to cover variants of the same merchant or payer, such as leaving out store numbers and references, but not so short it catches unrelated descriptions. Runs of digits were masked as ####, so never include #### in "contains" text.
-- Either use one of the user's existing Categories and one of its Subcategories, spelt exactly as given, with "transfer" false, or set "transfer" true, with "category" and "subcategory" empty, for money moving between the user's own Accounts, such as paying a credit card bill or moving money to savings.
-- Use a Spending Category for money going out and an Earnings Category for money coming in, unless money coming in is clearly a refund of earlier Spending.
+- Prefer the user's existing Categories and Subcategories: use one of them, spelt exactly as given, with "transfer" false, whenever one fits. Or set "transfer" true, with "category" and "subcategory" empty, for money moving between the user's own Accounts, such as paying a credit card bill or moving money to savings.
+- Only when no existing Subcategory fits, name a new Subcategory of an existing Category, or, when no existing Category fits either, a new Category and one Subcategory of it. Keep new names short and general enough for other merchants or payers like it, and never name a new Category or Subcategory the same as an existing one. The user decides whether to add it.
+- Use a Spending Category for money going out and an Earnings Category for money coming in, unless money coming in is clearly a refund of earlier Spending. A new Category takes the kind of the money its rule catches.
 
-Suggest a rule only when you are fairly sure of it. Leave out any description no existing Subcategory fits.`;
+Suggest a rule only when you are fairly sure of it.`;
 
 /** Asks Claude for Suggested Rules with exactly `request`, giving the text of its response. The API key comes only from `ANTHROPIC_API_KEY`. */
 export async function askClaude(request: SuggestionRequest): Promise<string> {

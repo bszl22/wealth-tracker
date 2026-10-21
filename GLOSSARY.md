@@ -80,7 +80,7 @@ Spending that repeats on a regular interval for about the same amount, found fro
 _Avoid_: Recurring payment, direct debit (a direct debit is a payment method, not a subscription), merchant (when meaning who a Subscription pays)
 
 **Suggested Rule**:
-A Categorisation Rule Claude proposes for Uncategorised Transactions. It changes nothing until you approve it, and then it is an ordinary Categorisation Rule.
+A Categorisation Rule Claude proposes for Uncategorised Transactions. It may name a new Category or Subcategory, marked as new. It changes nothing until you approve it, and then it is an ordinary Categorisation Rule, adding any new Category or Subcategory it names.
 _Avoid_: AI rule, recommendation
 
 ### Over time

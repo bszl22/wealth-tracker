@@ -157,8 +157,8 @@ export const madeUpReport: Report = madeUpReportWith({ categories, rules, found:
 
 /**
  * Made-up responses from Claude, one per suggestion, given only for a sent description containing its "contains" text:
- * one using an existing Subcategory, one marking a Transfer, one naming a Category that isn't in the rules file, and
- * one with masked text, which matches no real description, so only the first two are offered.
+ * one using an existing Subcategory, one marking a Transfer, one naming a new Category, and one with masked text, which
+ * matches no real description, so only the first three are offered.
  */
 const MADE_UP_SUGGESTIONS = [
   { contains: "MYSTERY MERCHANT", transfer: false, category: "Fun", subcategory: "Holidays" },

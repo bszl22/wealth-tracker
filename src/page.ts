@@ -6,7 +6,7 @@ import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
 import type { Subscriptions } from "./subscriptions.js";
-import { aboutToSend, type SentDescription, type SuggestedRule } from "./suggestions.js";
+import { aboutToSend, markedNew, type SentDescription, type SuggestedRule } from "./suggestions.js";
 
 const gbp = (pence: Pence) => (pence / 100).toLocaleString("en-GB", { style: "currency", currency: "GBP" });
 const dayLabel = (iso: IsoDate) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -564,15 +564,25 @@ function suggestRules(report: Report) {
   return section;
 }
 
-/** Where a rule sorts what it catches, as a rule form's "Sort into" list labels it. */
+/** Where a rule sorts what it catches, as a rule form's "Sort into" list labels an existing Subcategory or Transfer, and as a Suggested Rule's row names a new one. */
 const sortInto = (rule: SuggestedRule) => ("transfer" in rule ? "Transfer" : `${rule.category} › ${rule.subcategory}`);
+
+/** What a Suggested Rule adds to the rules file, if anything, as shown after where it sorts what it catches. */
+const marking = ({ adds }: SuggestedRule) => {
+  if (adds?.new === "Category") return ` (new ${adds.kind} Category)`;
+  if (adds?.new === "Subcategory") return " (new Subcategory)";
+  return "";
+};
 
 /**
  * The Suggested Rules, each with what it would catch now, to approve, edit in the rule form and then approve, or
- * reject. Approving saves it like a hand-made rule and shows the Report again; rejecting discards it, then `changed`.
+ * reject. Each is marked as new against the Report's Categories, so one naming a new Category an earlier approval
+ * added no longer adds it. Approving saves it like a hand-made rule and shows the Report again; rejecting discards it,
+ * then `changed`.
  */
 function suggestedList({ uncategorised, categories }: Report, changed: () => void) {
   const section = el("div");
+  suggested = suggested.map((rule) => markedNew(rule, { uncategorised, categories }));
   if (suggested.length === 0) return section;
   const rulePanel = el("div");
   const error = el("div", { class: "error", role: "alert", hidden: "" });
@@ -597,7 +607,7 @@ function suggestedList({ uncategorised, categories }: Report, changed: () => voi
     edit.addEventListener("click", () => {
       const direction = uncategorised.find(({ description }) => ruleMatches(rule.contains, description))?.direction ?? "Out";
       rulePanel.replaceChildren(
-        ruleForm(rule.contains, direction, uncategorised, categories, () => rulePanel.replaceChildren(), { sortInto: sortInto(rule), saved: discard }),
+        ruleForm(rule.contains, direction, uncategorised, categories, () => rulePanel.replaceChildren(), { suggested: rule, saved: discard }),
       );
       contains(rulePanel).focus();
     });
@@ -609,7 +619,9 @@ function suggestedList({ uncategorised, categories }: Report, changed: () => voi
     const actions = el("td", { class: "buttons" });
     actions.append(approve, edit, reject);
     const row = el("tr");
-    row.append(el("td", {}, rule.contains), el("td", {}, sortInto(rule)), el("td", { class: "preview" }, previewText(rule.contains, uncategorised)), actions);
+    const where = el("td", {}, sortInto(rule));
+    if (rule.adds) where.append(el("span", { class: "new" }, marking(rule)));
+    row.append(el("td", {}, rule.contains), where, el("td", { class: "preview" }, previewText(rule.contains, uncategorised)), actions);
     table.append(row);
   }
   section.append(el("h3", {}, "Suggested Rules"), scrolling(table), error, rulePanel);
@@ -649,8 +661,8 @@ function labelled(text: string, field: HTMLElement) {
 /**
  * A rule form's fields for adding a name: the choices "New Subcategory…" of a chosen existing Category (offered only
  * when there are Categories) and "New Category…" with its kind, starting as Spending for money out (`direction`) and
- * Earnings for money in, and one Subcategory. Shows only the fields the chosen choice needs, and says which name is
- * still missing before saving.
+ * Earnings for money in, and one Subcategory. Shows only the fields the chosen choice needs, fills them from a
+ * Suggested Rule's new name, and says which name is still missing before saving.
  */
 function newNameFields(direction: Direction, categories: Category[]) {
   const parent = el("select", { name: "parent" });
@@ -684,6 +696,14 @@ function newNameFields(direction: Direction, categories: Category[]) {
   return {
     choices,
     fields: [parentLabel, ...newCategoryLabels, newSubcategoryLabel],
+    fill: (rule: SuggestedRule) => {
+      if ("transfer" in rule || !rule.adds) return;
+      if (rule.adds.new === "Category") {
+        newCategory.value = rule.category;
+        kind.value = rule.adds.kind;
+      } else parent.value = rule.category;
+      newSubcategory.value = rule.subcategory;
+    },
     show: (adding: Then["adds"]) => {
       parentLabel.hidden = adding !== "Subcategory";
       newCategoryLabels.forEach((node) => (node.hidden = adding !== "Category"));
@@ -701,7 +721,7 @@ function newNameFields(direction: Direction, categories: Category[]) {
  * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
  * Transfer, or a new name from `newNameFields`. While the text is edited it shows what the rule would catch. Saving
  * adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again. Given a Suggested
- * Rule to `edit`, it starts with the Suggested Rule's choice, and saving approves it.
+ * Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving approves it.
  */
 function ruleForm(
   description: string,
@@ -709,7 +729,7 @@ function ruleForm(
   uncategorised: Report["uncategorised"],
   categories: Category[],
   close: () => void,
-  edit?: { sortInto: string; saved: () => void },
+  edit?: { suggested: SuggestedRule; saved: () => void },
 ) {
   const newName = newNameFields(direction, categories);
   const choices: Then[] = [
@@ -724,15 +744,19 @@ function ruleForm(
   const then = el("select", { name: "then" });
   then.append(el("option", { value: "", disabled: "", selected: "" }, "Choose where to sort it"));
   choices.forEach(({ label }, i) => then.append(el("option", { value: i }, label)));
-  const suggestedChoice = choices.findIndex(({ label }) => label === edit?.sortInto);
-  if (suggestedChoice >= 0) then.value = String(suggestedChoice);
+  if (edit) {
+    const { suggested } = edit;
+    const suggestedChoice = choices.findIndex(({ label, adds }) => (suggested.adds ? adds === suggested.adds.new : label === sortInto(suggested)));
+    if (suggestedChoice >= 0) then.value = String(suggestedChoice);
+    newName.fill(suggested);
+  }
   const preview = el("div", { class: "preview muted", "aria-live": "polite" });
   const showPreview = () => (preview.textContent = previewText(text.value, uncategorised));
   text.addEventListener("input", showPreview);
   showPreview();
   const adding = () => choices[Number(then.value)]?.adds;
   then.addEventListener("change", () => newName.show(adding()));
-  newName.show(undefined);
+  newName.show(adding());
   const error = el("div", { class: "error", role: "alert", hidden: "" });
   const fail = (message: string) => {
     error.textContent = message;

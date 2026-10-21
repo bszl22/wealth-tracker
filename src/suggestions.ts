@@ -1,5 +1,5 @@
 import { ruleMatches } from "./matching.js";
-import type { CategorisationRule, Category } from "./rules.js";
+import type { Category, CategoryKind, RuleToSave } from "./rules.js";
 import type { UncategorisedDescription } from "./spending.js";
 import type { Direction } from "./statements.js";
 
@@ -85,24 +85,55 @@ export const SUGGESTED_RULES_SCHEMA = {
   additionalProperties: false,
 };
 
-/** A Categorisation Rule Claude proposes. It changes nothing until approved, and is then saved like any other rule. */
-export type SuggestedRule = CategorisationRule;
+/**
+ * A Categorisation Rule Claude proposes, and any new Category or Subcategory it adds. It changes nothing until
+ * approved, and is then saved like any other rule.
+ */
+export type SuggestedRule = RuleToSave;
 
 /**
- * The Suggested Rules in Claude's response, `text`, using the rules file's Categories and Subcategories or marking a
- * Transfer, each with "contains" text matching at least one real, unmasked Uncategorised description.
+ * The Suggested Rules in Claude's response, `text`, each with "contains" text matching at least one real, unmasked
+ * Uncategorised description, and marking a Transfer or naming a Category and Subcategory. A Category or Subcategory
+ * not in the rules file is marked as new, a new Category being Earnings when most of the descriptions the rule matches
+ * are money in, and Spending otherwise.
  */
 export function suggestedRules(text: string, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): SuggestedRule[] {
   const suggestions = suggestionsIn(text);
-  const same = (a: unknown, b: string) => typeof a === "string" && a.toLowerCase() === b.toLowerCase();
-  const catchesSomething = (contains: unknown) => typeof contains === "string" && uncategorised.some(({ description }) => ruleMatches(contains, description));
-  return suggestions.flatMap(({ contains, transfer, category: categoryName, subcategory: subcategoryName }): SuggestedRule[] => {
-    if (!catchesSomething(contains)) return [];
-    if (transfer === true) return [{ contains: contains as string, transfer }];
-    const category = categories.find((c) => same(categoryName, c.name));
-    const subcategory = category?.subcategories.find((s) => same(subcategoryName, s));
-    return category && subcategory ? [{ contains: contains as string, category: category.name, subcategory }] : [];
+  const trimmed = (text: unknown) => (typeof text === "string" ? text.trim() : "");
+  return suggestions.flatMap(({ contains, transfer, category: named, subcategory: subcategoryNamed }): SuggestedRule[] => {
+    if (typeof contains !== "string") return [];
+    const matched = uncategorised.filter(({ description }) => ruleMatches(contains, description));
+    if (matched.length === 0) return [];
+    if (transfer === true) return [{ contains, transfer }];
+    const [category, subcategory] = [trimmed(named), trimmed(subcategoryNamed)];
+    if (category === "" || subcategory === "") return [];
+    return [markedNew({ contains, category, subcategory, adds: { new: "Category", kind: kindOf(matched) } }, { uncategorised, categories })];
   });
+}
+
+/**
+ * A Suggested Rule marked against `categories`, which may have changed since it was suggested: naming a Category and
+ * Subcategory as the rules file does, and marked as adding its Category or Subcategory only when that isn't there. A
+ * new Category keeps the kind it was suggested with, or follows the direction of the descriptions the rule matches.
+ */
+export function markedNew(rule: SuggestedRule, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): SuggestedRule {
+  if ("transfer" in rule) return rule;
+  const { contains, adds } = rule;
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const category = categories.find((c) => same(rule.category, c.name));
+  if (!category) {
+    const kind = adds?.new === "Category" ? adds.kind : kindOf(uncategorised.filter(({ description }) => ruleMatches(contains, description)));
+    return { contains, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
+  }
+  const subcategory = category.subcategories.find((s) => same(rule.subcategory, s));
+  if (!subcategory) return { contains, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
+  return { contains, category: category.name, subcategory };
+}
+
+/** A new Category's kind: Earnings when most of the descriptions its rule matches are money in, and Spending otherwise. */
+function kindOf(matched: UncategorisedDescription[]): CategoryKind {
+  const moneyIn = matched.filter(({ direction }) => direction === "In").length;
+  return moneyIn > matched.length - moneyIn ? "Earnings" : "Spending";
 }
 
 /** Each suggestion in Claude's response, failing, quoting nothing from it, when it isn't a list of suggestions. */

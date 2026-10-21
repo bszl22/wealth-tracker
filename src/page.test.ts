@@ -288,13 +288,14 @@ describe("asking Claude for Suggested Rules", () => {
     ]);
   });
 
-  it("shows Suggested Rules using existing Subcategories or Transfer, each with how many Uncategorised descriptions it catches and their total", async () => {
+  it("shows Suggested Rules using existing Subcategories, Transfer or a Category marked as new, each with how many Uncategorised descriptions it catches and their total", async () => {
     await showPage({ claude: recordingClaude });
     await askClaude();
-    // The made-up response also names a Category not in the rules file, and has masked "contains" text: neither is shown.
+    // The made-up response also has masked "contains" text, which isn't shown.
     expect(suggestedRows()).toEqual([
       ["MYSTERY MERCHANT", "Fun › Holidays", "Catches 1 Uncategorised description: £196.00 Spending."],
       ["FRIEND", "Transfer", "Catches 1 Uncategorised description: £45.00 Earnings."],
+      ["CITY PARKING", "Transport › Parking (new Spending Category)", "Catches 2 Uncategorised descriptions: £9.00 Spending."],
     ]);
     expect(suggest().textContent).not.toMatch(/approve all/i);
   });
@@ -302,7 +303,7 @@ describe("asking Claude for Suggested Rules", () => {
   it("discards a rejected Suggested Rule, saving and asking nothing", () => {
     const before = fetched.length;
     suggestedButton("FRIEND", "Reject").click();
-    expect(suggestedRows().map(([contains]) => contains)).toEqual(["MYSTERY MERCHANT"]);
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["MYSTERY MERCHANT", "CITY PARKING"]);
     expect(fetched.length).toBe(before);
   });
 
@@ -312,7 +313,7 @@ describe("asking Claude for Suggested Rules", () => {
     suggestedButton("MYSTERY MERCHANT", "Approve").click();
     await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
     expect(fetched.slice(-2)).toEqual(["/rules", "/report"]);
-    expect(suggestedRows().map(([contains]) => contains)).toEqual(["FRIEND"]);
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["FRIEND", "CITY PARKING"]);
   });
 
   it("opens a Suggested Rule in the rule form to edit it before approving it", async () => {
@@ -328,7 +329,83 @@ describe("asking Claude for Suggested Rules", () => {
     await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["CITY PARKING 20417", "CITY PARKING 20988"]));
     const [, earnings] = document.querySelectorAll("table.months");
     expect(rows(earnings!).find(([label]) => label === "Salary")![3]).toBe("£3,145.00");
-    expect(suggest().querySelector(".suggested table")).toBeNull();
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["CITY PARKING"]);
+  });
+
+  const spendingLabels = () => rows(document.querySelectorAll("table.months")[0]!).map(([label]) => label);
+  const formField = <E extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) => form.querySelector<E>(`[name="${name}"]`)!;
+
+  it("adds nothing when a Suggested Rule with a new Category is rejected", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    const before = fetched.length;
+    suggestedButton("CITY PARKING", "Reject").click();
+    expect(suggestedRows().map(([contains]) => contains)).toEqual(["MYSTERY MERCHANT", "FRIEND"]);
+    expect(fetched.length).toBe(before);
+    expect(spendingLabels()).not.toContain("Transport");
+  });
+
+  it("saves an approved Suggested Rule's new Category, as its kind, along with the rule", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    suggestedButton("CITY PARKING", "Approve").click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]));
+    expect(spendingLabels()).toEqual(expect.arrayContaining(["Transport", "Parking"]));
+  });
+
+  it("opens a Suggested Rule's new Category in the rule form, to rename or change it before approving it", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    suggestedButton("CITY PARKING", "Edit").click();
+    const form = suggest().querySelector<HTMLFormElement>("form.rule")!;
+    const field = <E extends HTMLInputElement | HTMLSelectElement>(name: string) => formField<E>(form, name);
+    expect(field<HTMLSelectElement>("then").selectedOptions[0]!.textContent).toBe("New Category…");
+    expect(field("category").value).toBe("Transport");
+    expect(field("kind").value).toBe("Spending");
+    expect(field("subcategory").value).toBe("Parking");
+    expect(field("category").closest("label")!.hidden).toBe(false);
+    field("category").value = "Getting About";
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]));
+    expect(spendingLabels()).toContain("Getting About");
+    expect(spendingLabels()).not.toContain("Transport");
+  });
+
+  it("stops marking a Category as new once an earlier Suggested Rule naming it is approved", async () => {
+    await showPage({
+      claude: async () =>
+        JSON.stringify({
+          suggestions: [
+            { contains: "CITY PARKING 20417", transfer: false, category: "Transport", subcategory: "Parking" },
+            { contains: "CITY PARKING 20988", transfer: false, category: "Transport", subcategory: "Parking" },
+            { contains: "MYSTERY", transfer: false, category: "Transport", subcategory: "Taxis" },
+          ],
+        }),
+    });
+    await askClaude();
+    suggestedButton("CITY PARKING 20417", "Approve").click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20988"]));
+    expect(suggestedRows().map(([contains, sortInto]) => [contains, sortInto])).toEqual([
+      ["CITY PARKING 20988", "Transport › Parking"],
+      ["MYSTERY", "Transport › Taxis (new Subcategory)"],
+    ]);
+    suggestedButton("MYSTERY", "Approve").click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20988"]));
+    expect(spendingLabels()).toContain("Taxis");
+  });
+
+  it("opens a Suggested Rule's new Subcategory in the rule form under its existing Category", async () => {
+    await showPage({ claude: async () => JSON.stringify({ suggestions: [{ contains: "MYSTERY", transfer: false, category: "Fun", subcategory: "Gadgets" }] }) });
+    await askClaude();
+    expect(suggestedRows()).toEqual([["MYSTERY", "Fun › Gadgets (new Subcategory)", "Catches 1 Uncategorised description: £196.00 Spending."]]);
+    suggestedButton("MYSTERY", "Edit").click();
+    const form = suggest().querySelector<HTMLFormElement>("form.rule")!;
+    const field = <E extends HTMLInputElement | HTMLSelectElement>(name: string) => formField<E>(form, name);
+    expect(field<HTMLSelectElement>("then").selectedOptions[0]!.textContent).toBe("New Subcategory…");
+    expect(field("parent").value).toBe("Fun");
+    expect(field("subcategory").value).toBe("Gadgets");
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(spendingLabels()).toContain("Gadgets"));
   });
 
   it("shows a clear error and changes nothing when asking Claude fails", async () => {

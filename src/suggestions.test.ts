@@ -102,12 +102,34 @@ describe("suggestedRules", () => {
     expect(suggested).toEqual([{ contains: "FRIEND", transfer: true }]);
   });
 
-  it("doesn't offer a suggestion naming a Category or Subcategory that isn't in the rules file", () => {
+  it("marks a suggestion naming a Subcategory not in the rules file as adding it to its existing Category", () => {
+    const suggested = suggestedRules(response({ contains: "CORNER SHOP", transfer: false, category: "food", subcategory: " Snacks " }), { uncategorised: real, categories });
+    expect(suggested).toEqual([{ contains: "CORNER SHOP", category: "Food", subcategory: "Snacks", adds: { new: "Subcategory" } }]);
+  });
+
+  it("marks a suggestion naming a Category not in the rules file as adding it, Spending when the descriptions it matches are money out", () => {
+    const suggested = suggestedRules(response({ contains: "CITY PARKING", transfer: false, category: "Transport", subcategory: "Parking" }), { uncategorised: real, categories });
+    expect(suggested).toEqual([{ contains: "CITY PARKING", category: "Transport", subcategory: "Parking", adds: { new: "Category", kind: "Spending" } }]);
+  });
+
+  it("makes a new Category Earnings when most of the descriptions it matches are money in", () => {
+    const mixed = [...real, uncategorised("GIFT FROM GRAN", "In"), uncategorised("GIFT FROM GRAN", "Out"), uncategorised("BIRTHDAY GIFT", "In")];
+    const suggested = suggestedRules(response({ contains: "GIFT", transfer: false, category: "Gifts", subcategory: "Family" }), { uncategorised: mixed, categories });
+    expect(suggested).toEqual([{ contains: "GIFT", category: "Gifts", subcategory: "Family", adds: { new: "Category", kind: "Earnings" } }]);
+  });
+
+  it("makes a new Category Spending when the descriptions it matches are as often money out as money in", () => {
+    const even = [...real, uncategorised("GIFT FROM GRAN", "In"), uncategorised("GIFT FROM GRAN", "Out")];
+    const suggested = suggestedRules(response({ contains: "GIFT", transfer: false, category: "Gifts", subcategory: "Family" }), { uncategorised: even, categories });
+    expect(suggested).toEqual([{ contains: "GIFT", category: "Gifts", subcategory: "Family", adds: { new: "Category", kind: "Spending" } }]);
+  });
+
+  it("doesn't offer a suggestion with no Category or Subcategory name that isn't a Transfer", () => {
     const suggested = suggestedRules(
       response(
-        { contains: "CITY PARKING", transfer: false, category: "Transport", subcategory: "Parking" },
-        { contains: "CORNER SHOP", transfer: false, category: "Food", subcategory: "Snacks" },
-        { contains: "CORNER SHOP", transfer: false, category: "Work", subcategory: "Groceries" },
+        { contains: "CITY PARKING", transfer: false, category: "", subcategory: "Parking" },
+        { contains: "CITY PARKING", transfer: false, category: "Transport", subcategory: "  " },
+        { contains: "CORNER SHOP", transfer: false, category: "Food", subcategory: 7 },
       ),
       { uncategorised: real, categories },
     );
