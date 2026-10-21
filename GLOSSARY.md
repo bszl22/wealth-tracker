@@ -76,8 +76,12 @@ _Avoid_: Filter, mapping
 The group holding every Spending or Earnings Transaction that no Categorisation Rule matches.
 
 **Subscription**:
-A payment to the same merchant for about the same amount that repeats on a regular interval, or one a Categorisation Rule puts in the Subscriptions Category. It is current if it charged within its usual interval plus a few days' grace.
-_Avoid_: Recurring payment, direct debit (a direct debit is a payment method, not a subscription)
+Spending that repeats on a regular interval for about the same amount, found from the Transactions themselves: those matched by the same Categorisation Rule, or sharing one description when no rule matches. Its Transactions keep their own Category, so Subscriptions are a view across Categories, never a Category. It is current if it charged within its usual interval plus a few days' grace.
+_Avoid_: Recurring payment, direct debit (a direct debit is a payment method, not a subscription), merchant (when meaning who a Subscription pays)
+
+**Suggested Rule**:
+A Categorisation Rule Claude proposes for Uncategorised Transactions. It changes nothing until you approve it, and then it is an ordinary Categorisation Rule.
+_Avoid_: AI rule, recommendation
 
 ### Over time
 
