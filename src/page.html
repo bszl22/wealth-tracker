@@ -36,7 +36,14 @@
   .scroll { overflow-x: auto; }
   table.months th, table.months td { white-space: nowrap; }
   table.months th:first-child, table.months td:first-child { position: sticky; left: 0; background: var(--bg); }
-  tr.net td { font-weight: 600; border-top: 2px solid var(--grid); }
+  tr.net td, tr.total td { font-weight: 600; border-top: 2px solid var(--grid); }
+  tr.subcategory td { color: var(--muted); font-size: 14px; }
+  tr.subcategory td:first-child { padding-left: 24px; }
+  button.expand { all: unset; cursor: pointer; }
+  button.expand::before { content: "▸"; display: inline-block; width: 16px; color: var(--muted); }
+  button.expand[aria-expanded="true"]::before { content: "▾"; }
+  button.expand:focus-visible { outline: 2px solid var(--assets); outline-offset: 2px; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>
 </head>
 <body>
@@ -117,33 +124,77 @@ function accountTable(accounts) {
 
 const monthHeading = (month) => (month.partial ? `${monthLabel(month.monthEnd)} so far` : monthLabel(month.monthEnd));
 
-/** A table with months across the top and one row per figure. */
+/** A table with months across the top and one row per figure. A row with subrows expands to show them. */
 function monthTable(heading, months, rows) {
   const table = el("table", { class: "months" });
   const head = el("tr");
   head.append(el("th", {}, heading));
   for (const month of months) head.append(el("th", { class: "balance" }, monthHeading(month)));
   table.append(head);
-  for (const { label, pence, className } of rows) {
+  const figureRow = ({ label, pence, className }, labelCell) => {
     const row = el("tr", className ? { class: className } : {});
-    row.append(el("td", {}, label));
+    row.append(labelCell ?? el("td", {}, label));
     for (const month of months) row.append(el("td", { class: "balance" }, gbp(pence(month))));
-    table.append(row);
+    return row;
+  };
+  for (const figure of rows) {
+    if (!figure.subrows) {
+      table.append(figureRow(figure));
+      continue;
+    }
+    const subrows = figure.subrows.map((subrow) => figureRow({ ...subrow, className: "subcategory" }));
+    for (const subrow of subrows) subrow.hidden = true;
+    const expand = el("button", { class: "expand", type: "button", "aria-expanded": "false" }, figure.label);
+    expand.addEventListener("click", () => {
+      const expanded = expand.getAttribute("aria-expanded") !== "true";
+      expand.setAttribute("aria-expanded", String(expanded));
+      for (const subrow of subrows) subrow.hidden = !expanded;
+    });
+    const labelCell = el("td");
+    labelCell.append(expand);
+    table.append(figureRow(figure, labelCell), ...subrows);
   }
   const scroll = el("div", { class: "scroll" });
   scroll.append(table);
   return scroll;
 }
 
-function spendingSection({ months }) {
+/** One row per Category of the kind, expandable into its Subcategories, then Uncategorised and the total. */
+function breakdownRows(categories, kind, figures) {
+  const rows = categories
+    .filter((category) => category.kind === kind)
+    .map((category, i) => ({
+      label: category.name,
+      pence: (m) => figures(m).categories[i].total,
+      subrows: category.subcategories.map((name, j) => ({ label: name, pence: (m) => figures(m).categories[i].subcategories[j].pence })),
+    }));
+  return [
+    ...rows,
+    { label: "Uncategorised", pence: (m) => figures(m).uncategorised },
+    { label: `Total ${kind}`, pence: (m) => figures(m).total, className: "total" },
+  ];
+}
+
+function rulesFileNote({ path, found }) {
+  if (found) return el("div", { class: "muted" }, "Sorted into Categories by your Categorisation Rules. Money in under a Spending Category is a Refund, reducing it. Transfers count as neither Spending nor Earnings.");
+  const note = el("div", { class: "muted" });
+  note.append(
+    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, create ",
+    el("code", {}, path),
+    ' listing your Categories and Categorisation Rules, such as { "categories": [{ "name": "Food", "kind": "Spending", "subcategories": ["Groceries"] }], "rules": [{ "contains": "TESCO", "category": "Food", "subcategory": "Groceries" }, { "contains": "AMERICAN EXPRESS", "transfer": true }] }.',
+  );
+  return note;
+}
+
+function spendingSection({ months, categories, rulesFile }) {
   const section = el("div");
   section.append(
     el("h2", {}, "Spending"),
-    el("div", { class: "muted" }, "With no Categorisation Rules yet, all Spending (money out) and Earnings (money in) is Uncategorised."),
-    monthTable("Spending", months, [{ label: "Uncategorised", pence: (m) => m.spending.uncategorised }]),
+    rulesFileNote(rulesFile),
+    monthTable("Spending", months, breakdownRows(categories, "Spending", (m) => m.spending)),
     el("h2", {}, "Earnings"),
     monthTable("Earnings", months, [
-      { label: "Uncategorised", pence: (m) => m.earnings.uncategorised },
+      ...breakdownRows(categories, "Earnings", (m) => m.earnings),
       { label: "Net (Earnings − Spending)", pence: (m) => m.net, className: "net" },
     ]),
   );

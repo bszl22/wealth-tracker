@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { calculateNetWorth } from "./netWorth.js";
+import { loadRules } from "./rules.js";
 import { scanStatements } from "./scanStatements.js";
 import type { Settings } from "./settings.js";
 import { calculateSpending } from "./spending.js";
@@ -32,11 +33,12 @@ export function startServer(settings: Settings, port: number): Promise<Server> {
 async function report(settings: Settings) {
   try {
     const { balances, transactions } = await scanStatements(settings.dataFolder);
+    const { categories, rules, path, found } = await loadRules(settings.dataFolder);
     const today = localToday();
     const { trackingStart } = settings;
     return {
       ...calculateNetWorth({ balances, trackingStart, today }),
-      spending: calculateSpending({ transactions, trackingStart, today }),
+      spending: { ...calculateSpending({ transactions, categories, rules, trackingStart, today }), categories, rulesFile: { path, found } },
     };
   } catch (error) {
     return { error: (error as Error).message };
