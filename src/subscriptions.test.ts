@@ -112,16 +112,47 @@ describe("findSubscriptions", () => {
     expect(subscriptions).toEqual([]);
   });
 
-  it("is current through the last charge plus its interval plus 7 days, and lapsed the day after", () => {
+  it("is current while its next charge falls after its Account's latest Transaction, however far behind today", () => {
     const monthly = charges("STREAMFLIX.COM", 1099, ["2026-04-15", "2026-05-15", "2026-06-15"]);
-    expect(find(monthly, "2026-07-22").subscriptions[0]!.current).toBe(true);
-    expect(find(monthly, "2026-07-23").subscriptions[0]!.current).toBe(false);
+    expect(find(monthly, "2027-03-01").subscriptions[0]!.current).toBe(true);
+  });
+
+  it("is lapsed once its next charge plus 7 days falls on or before its Account's latest Transaction with no charge", () => {
+    const coveredTo = (date: string) => hsbc(date, 450, "CORNER SHOP");
+    const monthly = charges("STREAMFLIX.COM", 1099, ["2026-04-15", "2026-05-15", "2026-06-15"]);
+    expect(find([...monthly, coveredTo("2026-07-21")]).subscriptions[0]!.current).toBe(true);
+    expect(find([...monthly, coveredTo("2026-07-22")]).subscriptions[0]!.current).toBe(false);
     const weekly = charges("VEG BOX DELIVERY", 1850, ["2026-06-22", "2026-06-29", "2026-07-06"]);
-    expect(find(weekly, "2026-07-20").subscriptions[0]!.current).toBe(true);
-    expect(find(weekly, "2026-07-21").subscriptions[0]!.current).toBe(false);
+    expect(find([...weekly, coveredTo("2026-07-19")]).subscriptions[0]!.current).toBe(true);
+    expect(find([...weekly, coveredTo("2026-07-20")]).subscriptions[0]!.current).toBe(false);
     const yearly = charges("PHOTO CLOUD ANNUAL", 5999, ["2024-07-08", "2025-07-08"]);
-    expect(find(yearly, "2026-07-15").subscriptions[0]!.current).toBe(true);
-    expect(find(yearly, "2026-07-16").subscriptions[0]!.current).toBe(false);
+    expect(find([...yearly, coveredTo("2026-07-14")]).subscriptions[0]!.current).toBe(true);
+    expect(find([...yearly, coveredTo("2026-07-15")]).subscriptions[0]!.current).toBe(false);
+  });
+
+  it("judges each Subscription against its own Account's latest Transaction", () => {
+    const monzo = (transaction: Transaction): Transaction => ({ ...transaction, statement: "Monzo Statements/2026.pdf", account: "Monzo" });
+    const { subscriptions } = find([
+      ...charges("STREAMFLIX.COM", 1099, ["2026-04-15", "2026-05-15", "2026-06-15"]),
+      hsbc("2026-09-30", 450, "CORNER SHOP"),
+      ...charges("MUSICBOX", 999, ["2026-04-20", "2026-05-20", "2026-06-20"]).map(monzo),
+      monzo(hsbc("2026-06-30", 450, "CORNER SHOP")),
+    ]);
+    expect(subscriptions.map(({ name, current }) => [name, current])).toEqual([
+      ["MUSICBOX", true],
+      ["Streaming (STREAMFLIX)", false],
+    ]);
+  });
+
+  it("counts in the total yearly cost only those current by their Account's latest Transaction", () => {
+    const { currentYearlyCost } = find(
+      [
+        ...charges("STREAMFLIX.COM", 1099, ["2026-04-15", "2026-05-15", "2026-06-15"]),
+        ...charges("MUSICBOX", 999, ["2026-01-20", "2026-02-20", "2026-03-20"]),
+      ],
+      "2027-03-01",
+    );
+    expect(currentYearlyCost).toBe(13188);
   });
 
   it("gives a yearly cost of the usual amount × 52, 12 or 1, to the penny", () => {
