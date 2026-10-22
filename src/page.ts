@@ -461,7 +461,7 @@ function rulesFileNote({ path, found }: Report["rulesFile"]) {
   if (found) return el("div", { class: "muted" }, "Sorted into Categories by your Categorisation Rules. Money in under a Spending Category is a Refund, reducing it. Transfers count as neither Spending nor Earnings.");
   const note = el("div", { class: "muted" });
   note.append(
-    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, make a rule from an Uncategorised description below with a new Category, which creates ",
+    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, make a rule from an Uncategorised description in To sort with a new Category, which creates ",
     el("code", {}, path),
     ', or create it yourself listing your Categories and Categorisation Rules, such as { "categories": [{ "name": "Food", "kind": "Spending", "subcategories": ["Groceries"] }], "rules": [{ "contains": "TESCO", "category": "Food", "subcategory": "Groceries" }, { "contains": "AMERICAN EXPRESS", "transfer": true }] }.',
   );
@@ -502,6 +502,20 @@ function uncategorisedList(report: Report) {
   }
   section.append(scrolling(table), rulePanel, panel, suggestRules(report));
   return section;
+}
+
+/** The Report tab's line saying how many Uncategorised descriptions there are to sort, following which opens To sort. */
+function toSortLine({ uncategorised }: Report, openToSort: () => void) {
+  const line = el("div", { class: "to-sort muted" });
+  if (uncategorised.length === 0) {
+    line.textContent = "Nothing to sort: every Transaction is sorted into a Category or marked as a Transfer.";
+    return line;
+  }
+  const count = uncategorised.length;
+  const open = el("button", { class: "link", type: "button" }, `${count} Uncategorised description${count === 1 ? "" : "s"} to sort`);
+  open.addEventListener("click", openToSort);
+  line.append(open, ".");
+  return line;
 }
 
 /** Suggested Rules from the last press of Suggest rules, until each is approved or rejected. Gone when the page closes. */
@@ -833,7 +847,7 @@ function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscription
   return section;
 }
 
-function spendingSection(report: Report) {
+function spendingSection(report: Report, openToSort: () => void) {
   const { months, rulesFile } = report;
   const section = el("div");
   section.append(
@@ -850,12 +864,54 @@ function spendingSection(report: Report) {
         className: "net",
       },
     ], "In"),
-    uncategorisedList(report),
+    toSortLine(report, openToSort),
   );
   return section;
 }
 
-/** Fetches the Report and shows it, in place of anything shown before, keeping the selected month. */
+type TabName = "Report" | "To sort";
+const TAB_NAMES: TabName[] = ["Report", "To sort"];
+
+/** The tab showing, kept when the Report is shown again, such as after a rule is saved. */
+let selectedTab: TabName = "Report";
+
+/**
+ * Tabs showing one of `panels` at a time, starting with the selected tab, and a function selecting a tab. The arrow keys
+ * move between the tabs.
+ */
+function tabbed(panels: Record<TabName, HTMLElement>) {
+  const bar = el("div", { class: "tabs", role: "tablist" });
+  const buttons = TAB_NAMES.map((name, i) => {
+    const panel = panels[name];
+    withAttributes(panel, { id: `tab-panel-${i}`, role: "tabpanel", "aria-labelledby": `tab-${i}` }, undefined);
+    const button = el("button", { id: `tab-${i}`, type: "button", role: "tab", "aria-controls": panel.id }, name);
+    button.addEventListener("click", () => select(name));
+    button.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (step === 0) return;
+      const next = TAB_NAMES[(i + step + TAB_NAMES.length) % TAB_NAMES.length]!;
+      select(next);
+      buttons[TAB_NAMES.indexOf(next)]!.focus();
+    });
+    return button;
+  });
+  bar.append(...buttons);
+  const select = (name: TabName) => {
+    selectedTab = name;
+    TAB_NAMES.forEach((n, i) => {
+      buttons[i]!.setAttribute("aria-selected", String(n === name));
+      buttons[i]!.tabIndex = n === name ? 0 : -1;
+      panels[n].hidden = n !== name;
+    });
+  };
+  select(selectedTab);
+  return { bar, select };
+}
+
+/**
+ * Fetches the Report and shows it, in place of anything shown before, keeping the selected month and tab. The Report
+ * tab reads the Report; the To sort tab tidies it, holding the Uncategorised descriptions and the ways to make rules.
+ */
 async function render() {
   const content = document.getElementById("content")!;
   const report: ReportResponse = await fetch("/report")
@@ -872,14 +928,18 @@ async function render() {
     return;
   }
   const { months } = report;
+  const reportTab = el("div", { class: "report-tab" });
+  const toSortTab = el("div", { class: "to-sort-tab" });
+  const tabs = tabbed({ Report: reportTab, "To sort": toSortTab });
+  content.append(tabs.bar, reportTab, toSortTab);
   const latest = months.at(-1)?.snapshot;
   if (latest) {
-    content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
-    content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
+    reportTab.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
+    reportTab.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
   // The latest full month starts selected.
   monthSelection.select(monthSelection.selected ?? (months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
-  content.append(
+  reportTab.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(months),
     spendingChart(months),
@@ -887,8 +947,9 @@ async function render() {
     whatChangedPanel(months),
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),
-    spendingSection(report),
+    spendingSection(report, () => tabs.select("To sort")),
     subscriptionsSection(report.subscriptions),
   );
+  toSortTab.append(uncategorisedList(report));
 }
 render();
