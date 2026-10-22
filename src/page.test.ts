@@ -44,7 +44,7 @@ beforeAll(() => showPage());
 
 describe("the page", () => {
   it("shows the latest Month-End Snapshot's Net Worth", () => {
-    expect(document.querySelector(".latest")!.textContent).toBe("£39,878.80");
+    expect(document.querySelector(".latest")!.textContent).toBe("£39,789.80");
   });
 
   it("lists every Spending Category and Subcategory, Uncategorised and the total, one column per month", () => {
@@ -85,11 +85,23 @@ describe("the Subscriptions table", () => {
       ["Subscription", "Interval", "Usual amount", "Last charge", "Status", "Yearly cost"],
       ["Rent (LANDLORD)", "Monthly", "£1,250.00", "1 Jul 2026", "Current", "£15,000.00"],
       ["Streaming (STREAMFLIX)", "Monthly", "£10.99", "15 Jun 2026", "Current", "£131.88"],
+      ["Holidays (TRAVEL COVER)", "Yearly", "£89.00", "3 Mar 2026", "Current", "£89.00"],
       ["Streaming (PHOTO CLOUD)", "Yearly", "£59.99", "8 Jul 2026", "Current", "£59.99"],
       ["Groceries (VEG BOX)", "Weekly", "£18.50", "23 Feb 2026", "Lapsed", "£962.00"],
       ["Streaming (MUSICBOX)", "Monthly", "£9.99", "20 Mar 2026", "Lapsed", "£119.88"],
-      ["Total yearly cost of current Subscriptions", "", "", "", "", "£15,191.87"],
+      ["Total yearly cost of current Subscriptions", "", "", "", "", "£15,280.87"],
     ]);
+  });
+
+  it("says some Subscriptions are found from repeating charges and some declared on rules", () => {
+    const explanation = document.querySelector(".subscriptions .muted")!.textContent!;
+    expect(explanation).toContain("found from repeating charges");
+    expect(explanation).toContain("declared on their rules");
+  });
+
+  it("keeps a declared Subscription's Transactions in their own Category in the Spending breakdown", () => {
+    const [spending] = document.querySelectorAll("table.months");
+    expect(rows(spending!).find(([label]) => label === "Holidays")!.slice(1, 6)).toEqual(["£0.00", "£0.00", "£89.00", "£0.00", "£1,480.00"]);
   });
 
   it("lists a Subscription's Transactions when its yearly cost is clicked", () => {
