@@ -107,6 +107,19 @@ describe("/rules", () => {
     expect(body.uncategorised.map(({ description }: { description: string }) => description)).not.toContain("MYSTERY MERCHANT LTD");
   });
 
+  it("refuses a rule adding a Category named Subscriptions, saving nothing", async () => {
+    const tracker = madeUpTracker();
+    const subscriptions = { ...rule, category: "Subscriptions", subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } };
+    expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(subscriptions))))).toEqual({
+      status: 400,
+      body: {
+        error: 'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.',
+      },
+    });
+    const { body } = await answer(await get("/report", tracker));
+    expect(body.uncategorised.map(({ description }: { description: string }) => description)).toContain("MYSTERY MERCHANT LTD");
+  });
+
   it("refuses a rule longer than any real one", async () => {
     const long = JSON.stringify({ ...rule, contains: "x".repeat(16_384) });
     expect(await answer(await handle()(fromPage("/rules", long)))).toEqual({ status: 413, body: { error: "The rule to save is too long." } });
