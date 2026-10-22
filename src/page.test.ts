@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { handlerFor } from "./server.js";
 import type { SuggestionRequest } from "./suggestions.js";
 import { madeUpClaude, madeUpTracker } from "./tools/madeUpReport.js";
@@ -92,6 +92,12 @@ describe("the Subscriptions table", () => {
     ]);
   });
 
+  it("explains that Current is judged against how far its Account's Statements reach, not today", () => {
+    expect(document.querySelector(".subscriptions .muted")!.textContent).toContain(
+      "Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed.",
+    );
+  });
+
   it("lists a Subscription's Transactions when its yearly cost is clicked", () => {
     const row = [...table().querySelectorAll("tr")].find((r) => r.cells[0]!.textContent === "Streaming (STREAMFLIX)")!;
     row.querySelector<HTMLButtonElement>("button.cell")!.click();
@@ -99,6 +105,68 @@ describe("the Subscriptions table", () => {
     expect(listed.map(([date, , description, amount]) => [date, description, amount])).toEqual(
       ["15 Jan 2026", "15 Feb 2026", "15 Mar 2026", "15 Apr 2026", "15 May 2026", "15 Jun 2026"].map((date) => [date, "STREAMFLIX.COM", "£10.99"]),
     );
+  });
+});
+
+describe("What changed", () => {
+  const section = () => document.querySelector(".what-changed")!;
+  /** Selects a month by its column heading in the Spending table. */
+  const select = (month: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>("table.months th button")].find((b) => b.textContent === month)!.click();
+  /** Each group of changes, as its heading and its table's rows. */
+  const groups = () => [...section().querySelectorAll(".changes")].map((g) => [g.querySelector("h3")!.textContent, rows(g.querySelector("table")!)]);
+
+  afterAll(() => select("Jun 26"));
+
+  it("groups the changes by what they mean, each largest first, with the month's amount and the usual amount and no signs", () => {
+    select("Apr 26");
+    expect(groups()).toEqual([
+      ["Spent more on", [["Subcategory", "Change", "Apr 26", "Usual"], ["Food › Eating Out", "£125.00", "£183.00", "£58.00"]]],
+      ["Spent less on", [
+        ["Subcategory", "Change", "Apr 26", "Usual"],
+        ["Home › Energy", "£45.00", "£80.00", "£125.00"],
+        ["Food › Groceries", "£40.33", "£280.00", "£320.33"],
+        ["Uncategorised", "£13.33", "£9.00", "£22.33"],
+        ["Fun › Streaming", "£9.99", "£10.99", "£20.98"],
+      ]],
+      ["Earned more from", [["Subcategory", "Change", "Apr 26", "Usual"], ["Savings › Interest", "£2.40", "£29.80", "£27.40"]]],
+      ["Earned less from", [["Subcategory", "Change", "Apr 26", "Usual"], ["Uncategorised", "£15.00", "£0.00", "£15.00"]]],
+    ]);
+  });
+
+  it("leaves out a group with no changes", () => {
+    select("Mar 26");
+    expect(groups().map(([heading]) => heading)).toEqual(["Spent less on", "Earned more from"]);
+  });
+
+  it("states the comparison once, and keeps the Largest Spending Transactions below", () => {
+    select("Apr 26");
+    const notes = [...section().querySelectorAll(".muted")].map((note) => note.textContent);
+    expect(notes).toEqual(["Against the average of Jan 26, Feb 26, Mar 26. Click a figure to see its Transactions."]);
+    expect([...section().querySelectorAll("h3")].at(-1)!.textContent).toBe("Largest Spending Transactions");
+    expect(rows(section().querySelector(".changes ~ .scroll table")!)[1]).toEqual(["1 Apr 2026", "Current Account", "DD LANDLORD RENT", "£1,250.00"]);
+  });
+
+  it("lists a change's Transactions when it is clicked", () => {
+    select("Apr 26");
+    section().querySelector<HTMLButtonElement>(".changes button.cell")!.click();
+    const listed = rows(section().querySelector(".transactions table")!).slice(1);
+    expect(listed.map(([date, , description, amount]) => [date, description, amount])).toEqual([
+      ["6 Apr 2026", "CORNER CAFE", "£27.00"],
+      ["9 Apr 2026", "CORNER CAFE", "£36.00"],
+      ["13 Apr 2026", "CORNER CAFE", "£33.00"],
+      ["17 Apr 2026", "CORNER CAFE", "£30.00"],
+      ["21 Apr 2026", "CORNER CAFE", "£27.00"],
+      ["27 Apr 2026", "CORNER CAFE", "£30.00"],
+    ]);
+  });
+
+  it("says a month not yet over, and Tracking Start, aren't compared", () => {
+    select("Jul 26 so far");
+    expect(section().querySelector(".muted")!.textContent).toBe("Jul 26 isn't over yet, so it isn't compared with earlier months.");
+    select("Jan 26");
+    expect(section().querySelector(".muted")!.textContent).toBe("Jan 26 is Tracking Start, so there's no earlier month to compare it with.");
+    expect(groups()).toEqual([]);
   });
 });
 
