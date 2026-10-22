@@ -3,7 +3,7 @@ import { calculateNetWorth } from "../netWorth.js";
 import { localToday, monthEndsFrom } from "../report.js";
 import { readStatements, reconcileStatements } from "../scanStatements.js";
 import { loadSettings } from "../settings.js";
-import type { Pence } from "../statements.js";
+import { pounds } from "./pounds.js";
 
 // Prints what each reader found in every Statement, then the Month-End Snapshots, to the terminal only.
 // Transactions are only counted, since their descriptions must never reach the terminal.
@@ -37,10 +37,4 @@ try {
 } catch (error) {
   console.error((error as Error).message);
   process.exitCode = 1;
-}
-
-function pounds(pence: Pence): string {
-  const sign = pence < 0 ? "-" : "";
-  const [whole, pennies] = [Math.trunc(Math.abs(pence) / 100), Math.abs(pence) % 100];
-  return `${sign}£${whole.toLocaleString("en-GB")}.${String(pennies).padStart(2, "0")}`;
 }

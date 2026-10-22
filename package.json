@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "statement-text": "tsx src/tools/statementText.ts",
     "check-statements": "tsx src/tools/checkStatements.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "check-rules": "tsx src/tools/checkRules.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.132.1",

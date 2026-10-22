@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Category, CategorisationRule } from "./rules.js";
 import type { Transaction } from "./spending.js";
-import { findSubscriptions, type Subscription } from "./subscriptions.js";
+import { findSubscriptions, notASubscriptionBecause, type Subscription } from "./subscriptions.js";
 
 // Made-up Transactions. Every description and figure is invented.
 const hsbc = (date: string, pence: number, description: string, direction: Transaction["direction"] = "Out"): Transaction => ({
@@ -195,5 +195,25 @@ describe("findSubscriptions", () => {
       ["MUSICBOX", false],
     ]);
     expect(currentYearlyCost).toBe(1500000 + 13188 + 5999);
+  });
+});
+
+describe("notASubscriptionBecause", () => {
+  it("is nothing when the charges repeat monthly within 10% of the usual amount", () => {
+    expect(notASubscriptionBecause(charges("PHONEPLAN", 1000, ["2026-04-02", "2026-05-02", "2026-06-02"]))).toBeUndefined();
+  });
+
+  it("names the first charge more than 10% from the usual amount, with that usual amount", () => {
+    const extra = hsbc("2026-05-20", 1500, "PHONEPLAN");
+    const because = notASubscriptionBecause([...charges("PHONEPLAN", 1000, ["2026-04-02", "2026-05-02", "2026-06-02"]), extra]);
+    expect(because).toEqual({ charge: extra, usual: 1000 });
+  });
+
+  it("gives the days between charges when they fit no interval", () => {
+    expect(notASubscriptionBecause(charges("PHONEPLAN", 1000, ["2026-04-02", "2026-04-20", "2026-06-02"]))).toEqual({ gaps: [18, 43] });
+  });
+
+  it("gives the days between charges when there are too few to show they repeat", () => {
+    expect(notASubscriptionBecause(charges("PHONEPLAN", 1000, ["2026-04-02", "2026-05-02"]))).toEqual({ gaps: [30] });
   });
 });
