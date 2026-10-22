@@ -17,9 +17,10 @@ const SUBSCRIPTION_INTERVALS: readonly unknown[] = ["Weekly", "Monthly", "Yearly
 /**
  * Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as
  * Transfers. A rule into a Spending Category can declare that it catches a Subscription charging at `subscription`'s
- * interval (ADR 0005).
+ * interval, or with `subscription: false` that it catches none, even when its charges repeat (ADR 0005). Without the
+ * field, detection decides.
  */
-export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string; subscription?: SubscriptionInterval } | { transfer: true });
+export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string; subscription?: SubscriptionInterval | false } | { transfer: true });
 
 export type Rules = { categories: Category[]; rules: CategorisationRule[] };
 
@@ -103,8 +104,8 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
   }
   if (subscription === undefined) return { contains, category: category.name, subcategory };
   if (category.kind !== "Spending") throw notSpending();
-  if (!SUBSCRIPTION_INTERVALS.includes(subscription)) throw fail('whose "subscription" is not "Weekly", "Monthly" or "Yearly"');
-  return { contains, category: category.name, subcategory, subscription: subscription as SubscriptionInterval };
+  if (subscription !== false && !SUBSCRIPTION_INTERVALS.includes(subscription)) throw fail('whose "subscription" is not "Weekly", "Monthly", "Yearly" or false');
+  return { contains, category: category.name, subcategory, subscription: subscription as SubscriptionInterval | false };
 }
 
 /**
