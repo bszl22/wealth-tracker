@@ -57,7 +57,7 @@
   tr.net td, tr.total td { font-weight: 600; border-top: 2px solid var(--grid); }
   tr.subcategory td { color: var(--muted); font-size: 14px; }
   .new { color: var(--assets); font-weight: 600; }
-  tr.subcategory td:first-child { padding-left: 24px; }
+  tr.subcategory td:first-child, .uncategorised-list tr.one-off td:first-child, .suggest-rules tr.one-off td:nth-child(2) { padding-left: 24px; }
   button.expand { all: unset; cursor: pointer; }
   button.expand::before { content: "▸"; display: inline-block; width: 16px; color: var(--muted); }
   button.expand[aria-expanded="true"]::before { content: "▾"; }
@@ -74,6 +74,7 @@
   .suggest-rules { margin-top: 24px; }
   .suggest-rules h3 { font-size: 15px; margin: 0 0 4px; }
   .suggest-rules button { margin-top: 12px; font: inherit; padding: 4px 12px; }
+  .suggest-rules button.expand { margin-top: 0; padding: 0; }
   .suggest-rules .error { margin-top: 12px; }
   .suggested h3 { margin-top: 24px; }
   .suggested td.buttons { white-space: nowrap; }
@@ -83,10 +84,20 @@
   form.rule h3 { font-size: 14px; margin: 0; }
   form.rule label[hidden] { display: none; }
   form.rule label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+  form.rule label.tickbox { display: flex; align-items: center; gap: 6px; color: var(--fg); }
+  form.rule label.tickbox input { margin: 0; }
   form.rule input, form.rule select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--grid); border-radius: 6px; padding: 6px 8px; max-width: 100%; }
   form.rule .error { margin-top: 0; padding: 8px 12px; }
   form.rule .buttons { display: flex; gap: 8px; }
   form.rule button { font: inherit; padding: 4px 12px; }
+  .tabs { display: flex; gap: 4px; margin: 16px 0 24px; border-bottom: 1px solid var(--grid); }
+  .tabs [role="tab"] { all: unset; cursor: pointer; padding: 8px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); }
+  .tabs [role="tab"]:hover { color: var(--fg); }
+  .tabs [role="tab"][aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
+  .tabs [role="tab"]:focus-visible { outline: 2px solid var(--assets); outline-offset: -2px; }
+  .to-sort { margin-top: 16px; }
+  button.link { all: unset; cursor: pointer; color: var(--assets); text-decoration: underline; }
+  button.link:focus-visible { outline: 2px solid var(--assets); outline-offset: 2px; }
 </style>
 </head>
 <body>

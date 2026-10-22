@@ -75,8 +75,12 @@ _Avoid_: Filter, mapping
 **Uncategorised**:
 The group holding every Spending or Earnings Transaction that no Categorisation Rule matches.
 
+**One-off**:
+An Uncategorised description with exactly one Transaction. One-offs are shown together rather than one by one, since they are rarely worth a Categorisation Rule.
+_Avoid_: Miscellaneous, sundry
+
 **Subscription**:
-Spending that repeats on a regular interval for about the same amount, found from the Transactions themselves: those matched by the same Categorisation Rule, or sharing one description when no rule matches. Its Transactions keep their own Category, so Subscriptions are a view across Categories, never a Category. It is current if it charged within its usual interval plus a few days' grace.
+Spending that repeats on a regular interval for about the same amount. Most are found from the Transactions themselves: those matched by the same Categorisation Rule, or sharing one description when no rule matches. Others are declared: a Categorisation Rule you mark as catching a Subscription makes its Transactions one from the first charge, before enough charges exist to find it. Its Transactions keep their own Category, so Subscriptions are a view across Categories, never a Category. It is lapsed only when its next charge, plus a few days' grace, falls inside the period its Account's Statements cover and no charge came; otherwise it is current.
 _Avoid_: Recurring payment, direct debit (a direct debit is a payment method, not a subscription), merchant (when meaning who a Subscription pays)
 
 **Suggested Rule**:

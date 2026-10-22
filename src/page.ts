@@ -1,6 +1,6 @@
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import { directionOf, kindFor, kindOf, markedNew, previewRule, type Category, type CategoryKind, type RuleToSave } from "./rules.js";
+import { directionOf, kindFor, kindOf, markedNew, previewRule, sortsIntoSpending, SUBSCRIPTION_INTERVALS, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave, type SubscriptionInterval } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
@@ -342,9 +342,18 @@ const SHOWN_CHANGES = 8;
 
 const signed = (pence: Pence) => (pence > 0 ? `+${gbp(pence)}` : pence < 0 ? `−${gbp(-pence)}` : gbp(0));
 
+/** The groups "What changed" sorts its changes into, by kind and whether the figure rose, in the order shown. */
+const CHANGE_GROUPS = [
+  { heading: "Spent more on", kind: "Spending", rose: true },
+  { heading: "Spent less on", kind: "Spending", rose: false },
+  { heading: "Earned more from", kind: "Earnings", rose: true },
+  { heading: "Earned less from", kind: "Earnings", rose: false },
+] as const;
+
 /**
- * "What changed" in the selected month: the Subcategories that moved most against the months before it, and its
- * largest Spending Transactions, each line listing its Transactions when clicked.
+ * "What changed" in the selected month: the Subcategories that moved most against the months before it, grouped by
+ * what the change means and each an unsigned amount, and its largest Spending Transactions, each line listing its
+ * Transactions when clicked.
  */
 function whatChangedPanel(months: ReportMonth[]) {
   return monthPanel(months, "What changed", (month) => monthLabel(month.monthEnd), (month, body) => {
@@ -359,21 +368,26 @@ function whatChangedPanel(months: ReportMonth[]) {
     const { comparedWith, changes, largest } = month.whatChanged;
     const panel = el("div", { class: "transactions-panel" });
     body.append(el("div", { class: "muted" }, `Against the average of ${comparedWith.map(monthLabel).join(", ")}. Click a figure to see its Transactions.`));
+    // The limit applies before grouping, and changes come largest first, so each group stays largest first.
     const moved = changes.filter((c) => c.change !== 0).slice(0, SHOWN_CHANGES);
     if (moved.length === 0) body.append(el("div", { class: "muted" }, "No Subcategory changed."));
-    else {
+    for (const { heading, kind, rose } of CHANGE_GROUPS) {
+      const group = moved.filter((c) => c.kind === kind && c.change > 0 === rose);
+      if (group.length === 0) continue;
       const table = el("table");
-      // The change sits next to its name, so it stays in view at phone width. Spending is the usual case, so only Earnings is labelled.
-      table.append(headerRow([["Subcategory"], ["Change", "balance"], [monthLabel(month.monthEnd), "balance"], ["Average", "balance"]]));
-      for (const { kind, category, subcategory, pence, average, change, transactions } of moved) {
-        const name = `${category ? `${category} › ${subcategory}` : subcategory}${kind === "Earnings" ? " (Earnings)" : ""}`;
+      // The change sits next to its name, so it stays in view at phone width.
+      table.append(headerRow([["Subcategory"], ["Change", "balance"], [monthLabel(month.monthEnd), "balance"], ["Usual", "balance"]]));
+      for (const { category, subcategory, pence, average, change, transactions } of group) {
+        const name = category ? `${category} › ${subcategory}` : subcategory;
         const changeCell = el("td", { class: "balance" });
-        changeCell.append(figureButton(signed(change), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, directionOf(kind), panel));
+        changeCell.append(figureButton(gbp(Math.abs(change)), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, directionOf(kind), panel));
         const row = el("tr");
         row.append(el("td", {}, name), changeCell, el("td", { class: "balance" }, gbp(pence)), el("td", { class: "balance" }, gbp(average)));
         table.append(row);
       }
-      body.append(scrolling(table));
+      const groupSection = el("div", { class: "changes" });
+      groupSection.append(el("h3", {}, heading), scrolling(table));
+      body.append(groupSection);
     }
     if (largest.length > 0) {
       const table = el("table");
@@ -461,16 +475,60 @@ function rulesFileNote({ path, found }: Report["rulesFile"]) {
   if (found) return el("div", { class: "muted" }, "Sorted into Categories by your Categorisation Rules. Money in under a Spending Category is a Refund, reducing it. Transfers count as neither Spending nor Earnings.");
   const note = el("div", { class: "muted" });
   note.append(
-    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, make a rule from an Uncategorised description below with a new Category, which creates ",
+    "No rules file yet, so all Spending (money out) and Earnings (money in) is Uncategorised. To sort them into Categories, make a rule from an Uncategorised description in To sort with a new Category, which creates ",
     el("code", {}, path),
     ', or create it yourself listing your Categories and Categorisation Rules, such as { "categories": [{ "name": "Food", "kind": "Spending", "subcategories": ["Groceries"] }], "rules": [{ "contains": "TESCO", "category": "Food", "subcategory": "Groceries" }, { "contains": "AMERICAN EXPRESS", "transfer": true }] }.',
   );
   return note;
 }
 
+/** One direction's One-offs: Uncategorised descriptions with exactly one Transaction. */
+type OneOffs = { direction: Direction; descriptions: UncategorisedDescription[] };
+
+const isOneOff = (u: UncategorisedDescription) => u.transactions.length === 1;
+
 /**
- * Uncategorised descriptions, largest total first, each listing its Transactions when clicked, and each with a form to
- * make a Categorisation Rule from it.
+ * The Uncategorised descriptions as To sort shows them: the repeating ones, in the Report's order, largest total first,
+ * then the One-offs of each direction that has any, Spending (money out) before Earnings (money in).
+ */
+function toSort(uncategorised: UncategorisedDescription[]): { repeating: UncategorisedDescription[]; oneOffs: OneOffs[] } {
+  const oneOffs = (["Out", "In"] as const)
+    .map((direction) => ({ direction, descriptions: uncategorised.filter((u) => isOneOff(u) && u.direction === direction) }))
+    .filter(({ descriptions }) => descriptions.length > 0);
+  return { repeating: uncategorised.filter((u) => !isOneOff(u)), oneOffs };
+}
+
+const oneOffCount = (count: number) => `${count} One-off${count === 1 ? "" : "s"}`;
+
+/** A button opening and closing `rows`, which start hidden, saying whether they are open: a collapsed group's line. */
+function opener(text: string, rows: HTMLElement[]) {
+  const button = el("button", { class: "expand", type: "button", "aria-expanded": "false" }, text);
+  for (const row of rows) row.hidden = true;
+  button.addEventListener("click", () => {
+    const opening = button.getAttribute("aria-expanded") !== "true";
+    button.setAttribute("aria-expanded", String(opening));
+    for (const row of rows) row.hidden = !opening;
+  });
+  return button;
+}
+
+/**
+ * A collapsed One-offs group: its line, with `before` and `after` around the opener naming how many there are, then
+ * `rows`, each marked as a One-off and hidden until the opener opens them.
+ */
+function oneOffsGroup(rows: HTMLElement[], before: HTMLElement[], after: HTMLElement[]) {
+  for (const row of rows) row.classList.add("one-off");
+  const name = el("td");
+  name.append(opener(oneOffCount(rows.length), rows));
+  const line = el("tr", { class: "one-offs" });
+  line.append(...before, name, ...after);
+  return [line, ...rows];
+}
+
+/**
+ * Uncategorised descriptions, the repeating ones first, largest total first, then each direction's One-offs collapsed
+ * into one line with their count and total, which opens into their rows. Each row lists its Transactions when clicked,
+ * and has a form to make a Categorisation Rule from it.
  */
 function uncategorisedList(report: Report) {
   const { uncategorised, categories } = report;
@@ -480,12 +538,13 @@ function uncategorisedList(report: Report) {
     section.append(el("div", { class: "muted" }, "Every Transaction is sorted into a Category or marked as a Transfer."));
     return section;
   }
-  section.append(el("div", { class: "muted" }, "Descriptions no Categorisation Rule matches, largest total first, so the next rule to write is at the top. Click a total to see its Transactions, or make a rule from a description."));
+  const { repeating, oneOffs } = toSort(uncategorised);
+  section.append(el("div", { class: "muted" }, `Descriptions no Categorisation Rule matches, largest total first, so the next rule to write is at the top${oneOffs.length > 0 ? ", then the One-offs, each with only one Transaction" : ""}. Click a total to see its Transactions, or make a rule from a description.`));
   const panel = el("div", { class: "transactions-panel" });
   const rulePanel = el("div");
   const table = el("table");
   table.append(headerRow([["Description"], ["Uncategorised"], ["Transactions", "balance"], ["Total", "balance"], [""]]));
-  for (const { description, direction, pence, transactions } of uncategorised) {
+  const descriptionRow = ({ description, direction, pence, transactions }: UncategorisedDescription) => {
     const kind = kindOf(direction);
     const total = el("td", { class: "balance" });
     total.append(figureButton(gbp(pence), `${description}, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
@@ -498,18 +557,42 @@ function uncategorisedList(report: Report) {
     action.append(make);
     const row = el("tr");
     row.append(el("td", { class: "description" }, description), el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, action);
-    table.append(row);
+    return row;
+  };
+  table.append(...repeating.map(descriptionRow));
+  for (const { direction, descriptions } of oneOffs) {
+    const kind = kindOf(direction);
+    const pence = descriptions.reduce((sum, u) => sum + u.pence, 0);
+    const transactions = descriptions.flatMap((u) => u.transactions);
+    const total = el("td", { class: "balance" });
+    total.append(figureButton(gbp(pence), `One-offs, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
+    table.append(...oneOffsGroup(descriptions.map(descriptionRow), [], [el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, el("td")]));
   }
   section.append(scrolling(table), rulePanel, panel, suggestRules(report));
   return section;
+}
+
+/** The Report tab's line saying how many Uncategorised descriptions there are to sort, following which opens To sort. */
+function toSortLine({ uncategorised }: Report, openToSort: () => void) {
+  const line = el("div", { class: "to-sort muted" });
+  if (uncategorised.length === 0) {
+    line.textContent = "Nothing to sort: every Transaction is sorted into a Category or marked as a Transfer.";
+    return line;
+  }
+  const count = uncategorised.length;
+  const open = el("button", { class: "link", type: "button" }, `${count} Uncategorised description${count === 1 ? "" : "s"} to sort`);
+  open.addEventListener("click", openToSort);
+  line.append(open, ".");
+  return line;
 }
 
 /** Suggested Rules from the last press of Suggest rules, until each is approved or rejected. Gone when the page closes. */
 let suggested: SuggestedRule[] = [];
 
 /**
- * The Suggest rules panel: exactly what asking Claude sends, each row with a tickbox, ticked to start, and the button,
- * disabled when no API key is set. Each press sends the ticked rows and the Categories once, then shows the Suggested
+ * The Suggest rules panel: exactly what asking Claude sends, each row with a tickbox, ticked to start except the
+ * One-offs, which sit unticked behind one collapsed group with a tickbox for them all, and the button, disabled when no
+ * API key is set. Each press sends the ticked rows and the Categories once, then shows the Suggested
  * Rules in place of any shown before, or, leaving those in place, why there are none.
  */
 function suggestRules(report: Report) {
@@ -519,18 +602,50 @@ function suggestRules(report: Report) {
     el("h3", {}, "Suggest rules"),
     el("div", { class: "muted" }, "Claude can suggest Categorisation Rules for these descriptions. Only this list and your Category and Subcategory names leave your Mac, and only when you press Suggest rules: each description once, with every run of 4 or more digits masked as ####, and whether money came in or went out. Untick any you'd rather not send."),
   );
-  const sendable = aboutToSend(uncategorised);
-  const unticked = new Set<SentDescription>();
+  const { repeating, oneOffs } = toSort(uncategorised);
+  if (oneOffs.length > 0) section.append(el("div", { class: "muted" }, "One-offs start unticked. Tick them all at once, or open them to tick each."));
+  // A row is a One-off when every description it is sent for is one, so a masked description that repeats is not.
+  const sentKey = ({ description, direction }: SentDescription) => [direction, description].join("\n");
+  const repeatingKeys = new Set(aboutToSend(repeating).map(sentKey));
+  const sendable = aboutToSend([...repeating, ...oneOffs.flatMap(({ descriptions }) => descriptions)]);
+  const sentOneOffs = sendable.filter((sent) => !repeatingKeys.has(sentKey(sent)));
+  const ticked = new Set(sendable.filter((sent) => repeatingKeys.has(sentKey(sent))));
   const table = el("table");
   table.append(headerRow([["Send"], ["Description"], ["Direction"]]));
-  for (const sent of sendable) {
-    const tick = el("input", { type: "checkbox", checked: "", "aria-label": `Send ${sent.description}` });
-    tick.addEventListener("change", () => (tick.checked ? unticked.delete(sent) : unticked.add(sent)));
+  const tickRow = (sent: SentDescription, changed: () => void = () => {}) => {
+    const tick = el("input", { type: "checkbox", "aria-label": `Send ${sent.description}` });
+    tick.checked = ticked.has(sent);
+    tick.addEventListener("change", () => {
+      if (tick.checked) ticked.add(sent);
+      else ticked.delete(sent);
+      changed();
+    });
     const tickCell = el("td");
     tickCell.append(tick);
     const row = el("tr");
     row.append(tickCell, el("td", {}, sent.description), el("td", {}, sent.direction === "Out" ? "Money out" : "Money in"));
-    table.append(row);
+    return { row, tick };
+  };
+  table.append(...sendable.filter((sent) => ticked.has(sent)).map((sent) => tickRow(sent).row));
+  if (sentOneOffs.length > 0) {
+    const group = el("input", { type: "checkbox", "aria-label": "Send all One-offs" });
+    const showGroup = () => {
+      const count = sentOneOffs.filter((sent) => ticked.has(sent)).length;
+      group.checked = count === sentOneOffs.length;
+      group.indeterminate = count > 0 && count < sentOneOffs.length;
+    };
+    const oneOffRows = sentOneOffs.map((sent) => tickRow(sent, showGroup));
+    group.addEventListener("change", () => {
+      for (const { tick } of oneOffRows) tick.checked = group.checked;
+      for (const sent of sentOneOffs) {
+        if (group.checked) ticked.add(sent);
+        else ticked.delete(sent);
+      }
+      showGroup();
+    });
+    const groupCell = el("td");
+    groupCell.append(group);
+    table.append(...oneOffsGroup(oneOffRows.map(({ row }) => row), [groupCell], [el("td")]));
   }
   const button = el("button", { type: "button" }, "Suggest rules");
   const status = el("div", { class: "sent muted", "aria-live": "polite" });
@@ -538,11 +653,11 @@ function suggestRules(report: Report) {
   const list = el("div", { class: "suggested" });
   const showSuggested = () => list.replaceChildren(suggestedList(report, showSuggested));
   button.addEventListener("click", async () => {
-    const ticked = sendable.filter((sent) => !unticked.has(sent));
+    const sending = sendable.filter((sent) => ticked.has(sent));
     button.disabled = true;
     error.hidden = true;
-    status.textContent = `Asking Claude about ${ticked.length} description${ticked.length === 1 ? "" : "s"}…`;
-    const response = await post<SuggestResponse>("/suggestions", { ticked }, "The tracker isn't responding, so nothing was suggested. Is it still running?");
+    status.textContent = `Asking Claude about ${sending.length} description${sending.length === 1 ? "" : "s"}…`;
+    const response = await post<SuggestResponse>("/suggestions", { ticked: sending }, "The tracker isn't responding, so nothing was suggested. Is it still running?");
     button.disabled = false;
     if ("error" in response) {
       status.textContent = "";
@@ -591,6 +706,12 @@ function suggestedList({ uncategorised, categories }: Report, changed: () => voi
     const discard = () => (suggested = suggested.filter((r) => r !== rule));
     const approve = el("button", { type: "button" }, "Approve");
     approve.addEventListener("click", async () => {
+      const refusal = subscriptionsRefusal(rule);
+      if (refusal) {
+        error.textContent = refusal;
+        error.hidden = false;
+        return;
+      }
       approve.disabled = true;
       const response = await saveRule(rule);
       if ("error" in response) {
@@ -717,11 +838,35 @@ function newNameFields(startingKind: CategoryKind, categories: Category[]) {
 }
 
 /**
+ * A rule form's "This is a Subscription" tickbox, offered only while `show` is told the rule sorts into Spending, and
+ * once ticked its interval, starting at Monthly. `mark` gives the interval to save the rule with, or nothing.
+ */
+function subscriptionFields() {
+  const tickbox = el("input", { name: "subscription", type: "checkbox" });
+  const tickboxLabel = el("label", { class: "tickbox" });
+  tickboxLabel.append(tickbox, "This is a Subscription");
+  const interval = el("select", { name: "interval" });
+  for (const i of SUBSCRIPTION_INTERVALS) interval.append(el("option", { value: i }, i));
+  interval.value = "Monthly";
+  const intervalLabel = labelled("Interval", interval);
+  const declared = () => !tickboxLabel.hidden && tickbox.checked;
+  return {
+    fields: [tickboxLabel, intervalLabel],
+    show: (spending: boolean) => {
+      tickboxLabel.hidden = !spending;
+      intervalLabel.hidden = !declared();
+    },
+    mark: () => (declared() ? (interval.value as SubscriptionInterval) : undefined),
+  };
+}
+
+/**
  * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
  * Transfer, or a new name from `newNameFields`. A new Category's kind starts as `kindFor` gives it, falling back to
  * `direction`, that of the row the form was started from. While the text is edited it shows what the rule would
- * catch. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again.
- * Given a Suggested Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving
+ * catch. For a Spending Subcategory it offers "This is a Subscription" (`subscriptionFields`), saving the rule with that
+ * mark when ticked. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report
+ * again. Given a Suggested Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving
  * approves it.
  */
 function ruleForm(
@@ -758,6 +903,15 @@ function ruleForm(
   const adding = () => choices[Number(then.value)]?.adds;
   then.addEventListener("change", () => newName.show(adding()));
   newName.show(adding());
+  const subscriptionMark = subscriptionFields();
+  const chosenRule = () => (then.value === "" ? undefined : choices[Number(then.value)]?.rule(text.value));
+  const showSubscription = () => {
+    const rule = chosenRule();
+    subscriptionMark.show(rule !== undefined && sortsIntoSpending(rule, categories));
+  };
+  // Captured, so a change to any field the rule depends on is seen here whether or not the change event bubbles.
+  form.addEventListener("change", showSubscription, true);
+  showSubscription();
   const error = el("div", { class: "error", role: "alert", hidden: "" });
   const fail = (message: string) => {
     error.textContent = message;
@@ -773,8 +927,13 @@ function ruleForm(
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
     const missing = newName.missing(adding());
     if (missing) return fail(missing);
+    const declared = subscriptionMark.mark();
+    const named = chosen.rule(text.value);
+    const rule = declared && !("transfer" in named) ? { ...named, subscription: declared } : named;
+    const refusal = subscriptionsRefusal(rule);
+    if (refusal) return fail(refusal);
     save.disabled = true;
-    const response = await saveRule(chosen.rule(text.value));
+    const response = await saveRule(rule);
     if ("error" in response) {
       save.disabled = false;
       return fail(response.error);
@@ -789,6 +948,7 @@ function ruleForm(
     labelled("Description contains", text),
     labelled("Sort into", then),
     ...newName.fields,
+    ...subscriptionMark.fields,
     preview,
     el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
     error,
@@ -808,7 +968,7 @@ function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscription
     section.append(el("div", { class: "muted" }, "No Spending repeats weekly, monthly or yearly for about the same amount yet."));
     return section;
   }
-  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly for about the same amount, found from your Transactions, which keep their own Categories. Current means it charged within its interval plus 7 days. Click a yearly cost to see its Transactions."));
+  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly. Most are found from repeating charges for about the same amount; others are declared on their rules, each marked as catching a Subscription with its interval, so they show from the first charge. Their Transactions keep their own Categories. Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed. Click a yearly cost to see its Transactions."));
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table");
   table.append(headerRow([["Subscription"], ["Interval"], ["Usual amount", "balance"], ["Last charge"], ["Status"], ["Yearly cost", "balance"]]));
@@ -833,7 +993,7 @@ function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscription
   return section;
 }
 
-function spendingSection(report: Report) {
+function spendingSection(report: Report, openToSort: () => void) {
   const { months, rulesFile } = report;
   const section = el("div");
   section.append(
@@ -850,12 +1010,54 @@ function spendingSection(report: Report) {
         className: "net",
       },
     ], "In"),
-    uncategorisedList(report),
+    toSortLine(report, openToSort),
   );
   return section;
 }
 
-/** Fetches the Report and shows it, in place of anything shown before, keeping the selected month. */
+type TabName = "Report" | "To sort";
+const TAB_NAMES: TabName[] = ["Report", "To sort"];
+
+/** The tab showing, kept when the Report is shown again, such as after a rule is saved. */
+let selectedTab: TabName = "Report";
+
+/**
+ * Tabs showing one of `panels` at a time, starting with the selected tab, and a function selecting a tab. The arrow keys
+ * move between the tabs.
+ */
+function tabbed(panels: Record<TabName, HTMLElement>) {
+  const bar = el("div", { class: "tabs", role: "tablist" });
+  const buttons = TAB_NAMES.map((name, i) => {
+    const panel = panels[name];
+    withAttributes(panel, { id: `tab-panel-${i}`, role: "tabpanel", "aria-labelledby": `tab-${i}` }, undefined);
+    const button = el("button", { id: `tab-${i}`, type: "button", role: "tab", "aria-controls": panel.id }, name);
+    button.addEventListener("click", () => select(name));
+    button.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (step === 0) return;
+      const next = TAB_NAMES[(i + step + TAB_NAMES.length) % TAB_NAMES.length]!;
+      select(next);
+      buttons[TAB_NAMES.indexOf(next)]!.focus();
+    });
+    return button;
+  });
+  bar.append(...buttons);
+  const select = (name: TabName) => {
+    selectedTab = name;
+    TAB_NAMES.forEach((n, i) => {
+      buttons[i]!.setAttribute("aria-selected", String(n === name));
+      buttons[i]!.tabIndex = n === name ? 0 : -1;
+      panels[n].hidden = n !== name;
+    });
+  };
+  select(selectedTab);
+  return { bar, select };
+}
+
+/**
+ * Fetches the Report and shows it, in place of anything shown before, keeping the selected month and tab. The Report
+ * tab reads the Report; the To sort tab tidies it, holding the Uncategorised descriptions and the ways to make rules.
+ */
 async function render() {
   const content = document.getElementById("content")!;
   const report: ReportResponse = await fetch("/report")
@@ -872,14 +1074,18 @@ async function render() {
     return;
   }
   const { months } = report;
+  const reportTab = el("div", { class: "report-tab" });
+  const toSortTab = el("div", { class: "to-sort-tab" });
+  const tabs = tabbed({ Report: reportTab, "To sort": toSortTab });
+  content.append(tabs.bar, reportTab, toSortTab);
   const latest = months.at(-1)?.snapshot;
   if (latest) {
-    content.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
-    content.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
+    reportTab.append(el("div", { class: "latest" }, gbp(latest.netWorth)));
+    reportTab.append(el("div", { class: "muted" }, `${gbp(latest.assets)} in Assets less ${gbp(latest.liabilities)} in Liabilities, as of ${monthLabel(latest.monthEnd)} month end`));
   }
   // The latest full month starts selected.
   monthSelection.select(monthSelection.selected ?? (months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
-  content.append(
+  reportTab.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(months),
     spendingChart(months),
@@ -887,8 +1093,9 @@ async function render() {
     whatChangedPanel(months),
     el("h2", {}, "Accounts"),
     accountTable(report.accounts),
-    spendingSection(report),
+    spendingSection(report, () => tabs.select("To sort")),
     subscriptionsSection(report.subscriptions),
   );
+  toSortTab.append(uncategorisedList(report));
 }
 render();

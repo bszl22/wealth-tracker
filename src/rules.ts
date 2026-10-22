@@ -9,8 +9,30 @@ export type CategoryKind = "Spending" | "Earnings";
 
 export type Category = { name: string; kind: CategoryKind; subcategories: string[] };
 
-/** Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as Transfers. */
-export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string } | { transfer: true });
+/** How often a Subscription can charge, shortest first. */
+export const SUBSCRIPTION_INTERVALS = ["Weekly", "Monthly", "Yearly"] as const;
+
+/** How often a Subscription charges. */
+export type SubscriptionInterval = (typeof SUBSCRIPTION_INTERVALS)[number];
+
+const isSubscriptionInterval = (interval: unknown): interval is SubscriptionInterval => (SUBSCRIPTION_INTERVALS as readonly unknown[]).includes(interval);
+
+/** Each interval as the rules file spells it, in quotes. */
+const QUOTED_INTERVALS = SUBSCRIPTION_INTERVALS.map((interval) => `"${interval}"`);
+
+/** The intervals a rule can declare, as `"Weekly", "Monthly" or "Yearly"`. */
+const INTERVAL_CHOICES = `${QUOTED_INTERVALS.slice(0, -1).join(", ")} or ${QUOTED_INTERVALS.at(-1)}`;
+
+/** Why Subscriptions can't be a Category (ADR 0005), as both the rules file's and a rule's refusal say. */
+const NOT_A_CATEGORY = "Subscriptions is a view across Categories, not a Category";
+
+/**
+ * Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as
+ * Transfers. A rule into a Spending Category can declare that it catches a Subscription charging at `subscription`'s
+ * interval, or with `subscription: false` that it catches none, even when its charges repeat (ADR 0005). Without the
+ * field, detection decides.
+ */
+export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string; subscription?: SubscriptionInterval | false } | { transfer: true });
 
 export type Rules = { categories: Category[]; rules: CategorisationRule[] };
 
@@ -55,15 +77,34 @@ function checkedCategory(category: unknown): Category {
   }
   if (subcategories.some((s, i) => subcategories.findIndex((t) => sameName(s, t)) !== i)) throw fail("listing a Subcategory twice");
   if (kind !== "Spending" && kind !== "Earnings") throw fail('whose "kind" is not "Spending" or "Earnings"');
+  if (isSubscriptions(name)) {
+    throw fail(
+      `named Subscriptions, but ${NOT_A_CATEGORY}. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": ${INTERVAL_CHOICES}, then remove the Category`,
+    );
+  }
   return { name, kind, subcategories };
+}
+
+/** Whether a Category name is Subscriptions, which is a view across Categories and never a Category (ADR 0005). */
+const isSubscriptions = (name: string) => sameName(name, "Subscriptions");
+
+/**
+ * Why a rule to save is refused because it adds a Category named Subscriptions, by `sameName`, or nothing when it
+ * doesn't. The page checks it before saving, and saving checks it again.
+ */
+export function subscriptionsRefusal(rule: RuleToSave): string | undefined {
+  if ("transfer" in rule || rule.adds?.new !== "Category" || !isSubscriptions(rule.category)) return undefined;
+  return `${NOT_A_CATEGORY}, so the rule wasn't saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.`;
 }
 
 const HOW_TO_FIX = 'Give it a Category and Subcategory, or "transfer": true';
 
 function checkedRule(rule: unknown, categories: Category[]): CategorisationRule {
   const fail = (problem: string) => new Error(`${RULES_FILE} has a rule ${problem}: ${JSON.stringify(rule)}`);
-  const { contains, category: categoryName, subcategory, transfer } = (rule ?? {}) as Record<string, unknown>;
+  const { contains, category: categoryName, subcategory, transfer, subscription } = (rule ?? {}) as Record<string, unknown>;
+  const notSpending = () => fail('declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription"');
   if (typeof contains !== "string" || contains.trim() === "") throw fail('with no "contains" text to look for');
+  if (transfer === true && subscription !== undefined) throw notSpending();
   if (transfer === true) return { contains, transfer };
   if (transfer !== undefined) throw fail(`whose "transfer" is not true. ${HOW_TO_FIX}`);
   if (typeof categoryName !== "string") throw fail(`with no "category". ${HOW_TO_FIX}`);
@@ -73,7 +114,10 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
   if (!category.subcategories.includes(subcategory)) {
     throw fail(`naming "${subcategory}", which is not a Subcategory of ${category.name}`);
   }
-  return { contains, category: category.name, subcategory };
+  if (subscription === undefined) return { contains, category: category.name, subcategory };
+  if (category.kind !== "Spending") throw notSpending();
+  if (subscription !== false && !isSubscriptionInterval(subscription)) throw fail(`whose "subscription" is not ${QUOTED_INTERVALS.join(", ")} or false`);
+  return { contains, category: category.name, subcategory, subscription };
 }
 
 /**
@@ -83,16 +127,22 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
 export type RuleToSave = CategorisationRule & { adds?: { new: "Category"; kind: CategoryKind } | { new: "Subcategory" } };
 
 /**
- * A rule sent to be saved, checked: its "contains" text as typed, its Category and Subcategory names trimmed, or marked
- * as a Transfer, and anything else left out. Fails saying what is wrong with it.
+ * A rule sent to be saved, checked: its "contains" text as typed, its Category and Subcategory names trimmed with any
+ * subscription interval it declares, or marked as a Transfer, and anything else left out. Fails saying what is wrong
+ * with it. Whether its Category is Spending, as a subscription mark needs, is checked when it is saved (`withRule`).
  */
 export function ruleToSave(rule: unknown): RuleToSave {
-  const { contains, transfer, category, subcategory, adds } = fieldsOf(rule);
+  const { contains, transfer, category, subcategory, adds, subscription } = fieldsOf(rule);
   if (typeof contains !== "string" || contains.trim() === "") throw new Error('The rule has no "contains" text to look for, so it wasn\'t saved.');
+  if (transfer === true && subscription !== undefined) throw new Error(NOT_SPENDING);
   if (transfer === true) return { contains, transfer };
   if (transfer !== undefined) throw new Error('The rule\'s "transfer" can only be true, so it wasn\'t saved.');
+  if (subscription !== undefined && !isSubscriptionInterval(subscription)) {
+    throw new Error(`The rule's "subscription" can only be ${INTERVAL_CHOICES}, so it wasn't saved.`);
+  }
   const trimmed = (name: unknown) => (typeof name === "string" ? name.trim() : "");
-  const named = { contains, category: trimmed(category), subcategory: trimmed(subcategory) };
+  const declared = subscription === undefined ? {} : { subscription };
+  const named = { contains, category: trimmed(category), subcategory: trimmed(subcategory), ...declared };
   const { new: adding, kind } = fieldsOf(adds);
   if (adds !== undefined) {
     if (adding !== "Category" && adding !== "Subcategory") throw new Error("The rule can only add a new Category or a new Subcategory, so it wasn't saved.");
@@ -104,6 +154,19 @@ export function ruleToSave(rule: unknown): RuleToSave {
   return { ...named, adds: adding === "Category" ? { new: "Category", kind: kind as CategoryKind } : { new: "Subcategory" } };
 }
 
+/** Why a rule declaring a Subscription is refused when it doesn't sort into Spending. */
+const NOT_SPENDING = "Only a rule sorting into a Spending Subcategory can be a Subscription, so the rule wasn't saved.";
+
+/**
+ * Whether a rule to save sorts into a Spending Subcategory of `categories`, existing or new, so it can declare a
+ * Subscription. The page offers the mark only then, and saving refuses it otherwise.
+ */
+export function sortsIntoSpending(rule: RuleToSave, categories: Category[]): boolean {
+  if ("transfer" in rule) return false;
+  if (rule.adds?.new === "Category") return rule.adds.kind === "Spending";
+  return categories.find(({ name }) => sameName(name, rule.category))?.kind === "Spending";
+}
+
 /** The fields of what was sent, or none when it isn't an object. */
 const fieldsOf = (sent: unknown) => (typeof sent === "object" && sent !== null ? sent : {}) as Record<string, unknown>;
 
@@ -112,15 +175,20 @@ const fieldsOf = (sent: unknown) => (typeof sent === "object" && sent !== null ?
  * file spells them, and any new Category added after the others or new Subcategory added to the end of its Category's,
  * as 2-space JSON, leaving everything else unchanged and in order. Fails, quoting nothing from the file, when the file
  * doesn't read cleanly or wouldn't with the rule added, and refuses a new Category or Subcategory named the same as an
- * existing one.
+ * existing one, a new Category named Subscriptions (`subscriptionsRefusal`), and a subscription mark on a rule not
+ * sorting into Spending (`sortsIntoSpending`).
  */
 export function withRule(contents: string | undefined, rule: RuleToSave): string {
+  let existing: Rules;
   try {
-    readRules(contents);
+    existing = readRules(contents);
   } catch {
     // The reader's message quotes the file, so only says that it failed.
     throw new Error(`${RULES_FILE} doesn't read cleanly, so the rule wasn't saved. Fix ${RULES_FILE}, then reload the page to see the problem.`);
   }
+  const refusal = subscriptionsRefusal(rule);
+  if (refusal) throw new Error(refusal);
+  if ("subscription" in rule && rule.subscription !== undefined && !sortsIntoSpending(rule, existing.categories)) throw new Error(NOT_SPENDING);
   const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { categories: Category[]; rules: unknown[] });
   const { adds, ...named } = rule;
   const added = "transfer" in named ? named : { ...named, ...spelledAsIn(file.categories, named, adds) };
@@ -196,16 +264,17 @@ export function kindFor(contains: string, uncategorised: UncategorisedDescriptio
  */
 export function markedNew(rule: RuleToSave, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): RuleToSave {
   if ("transfer" in rule) return rule;
-  const { contains, adds } = rule;
+  const { adds } = rule;
+  const containsAndMark = { contains: rule.contains, ...(rule.subscription === undefined ? {} : { subscription: rule.subscription }) };
   const category = categories.find(({ name }) => sameName(rule.category, name));
   if (!category) {
     // With no row it was started from, a rule catching nothing starts as Spending, the usual case.
-    const kind = adds?.new === "Category" ? adds.kind : kindFor(contains, uncategorised, "Out");
-    return { contains, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
+    const kind = adds?.new === "Category" ? adds.kind : kindFor(rule.contains, uncategorised, "Out");
+    return { ...containsAndMark, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
   }
   const subcategory = category.subcategories.find((name) => sameName(rule.subcategory, name));
-  if (!subcategory) return { contains, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
-  return { contains, category: category.name, subcategory };
+  if (!subcategory) return { ...containsAndMark, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
+  return { ...containsAndMark, category: category.name, subcategory };
 }
 
 /** What a rule with this "contains" text would catch among the Uncategorised descriptions. */

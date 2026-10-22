@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categorise, directionOf, kindFor, kindOf, markedNew, previewRule, readRules, ruleToSave, withRule } from "./rules.js";
+import { categorise, directionOf, kindFor, kindOf, markedNew, previewRule, readRules, ruleToSave, subscriptionsRefusal, withRule } from "./rules.js";
 import type { Category, RuleToSave } from "./rules.js";
 import type { UncategorisedDescription } from "./spending.js";
 import type { Direction } from "./statements.js";
@@ -33,6 +33,42 @@ describe("readRules", () => {
   it("reads a rule marking Transactions as Transfers, which needs no Category", () => {
     const contents = rulesFile({ categories: [], rules: [{ contains: "CARD BILL", transfer: true }] });
     expect(readRules(contents)).toEqual({ categories: [], rules: [{ contains: "CARD BILL", transfer: true }] });
+  });
+
+  it("reads a Spending rule declaring it catches a Subscription, with its weekly, monthly or yearly interval", () => {
+    const declared = ["Weekly", "Monthly", "Yearly"].map((subscription, i) => ({ contains: `SHOP ${i}`, category: "Food", subcategory: "Groceries", subscription }));
+    const contents = rulesFile({ categories: [food], rules: declared });
+    expect(readRules(contents).rules).toEqual(declared);
+  });
+
+  it("reads a Spending rule marked as catching no Subscription", () => {
+    const marked = { contains: "LANDLORD", category: "Food", subcategory: "Groceries", subscription: false };
+    expect(readRules(rulesFile({ categories: [food], rules: [marked] })).rules).toEqual([marked]);
+  });
+
+  it("fails on a Transfer rule or an Earnings rule marked as catching no Subscription, since only Spending can be one", () => {
+    const transfer = rulesFile({ categories: [], rules: [{ contains: "CARD BILL", transfer: true, subscription: false }] });
+    expect(() => readRules(transfer)).toThrow('Only a rule into a Spending Category can have "subscription"');
+    const earnings = rulesFile({ categories: [work], rules: [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary", subscription: false }] });
+    expect(() => readRules(earnings)).toThrow('Only a rule into a Spending Category can have "subscription"');
+  });
+
+  it("fails on a Subscription declared with an interval other than Weekly, Monthly or Yearly, or false, quoting the rule", () => {
+    const contents = rulesFile({ categories: [food], rules: [{ contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: "Daily" }] });
+    expect(() => readRules(contents)).toThrow(
+      'rules.json has a rule whose "subscription" is not "Weekly", "Monthly", "Yearly" or false: {"contains":"corner shop","category":"Food","subcategory":"Groceries","subscription":"Daily"}',
+    );
+  });
+
+  it("fails on a Transfer rule or an Earnings rule declaring a Subscription, since only Spending can be one", () => {
+    const transfer = rulesFile({ categories: [], rules: [{ contains: "CARD BILL", transfer: true, subscription: "Monthly" }] });
+    expect(() => readRules(transfer)).toThrow(
+      'rules.json has a rule declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription": {"contains":"CARD BILL","transfer":true,"subscription":"Monthly"}',
+    );
+    const earnings = rulesFile({ categories: [work], rules: [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary", subscription: "Monthly" }] });
+    expect(() => readRules(earnings)).toThrow(
+      'rules.json has a rule declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription": {"contains":"EMPLOYER LTD","category":"Work","subcategory":"Salary","subscription":"Monthly"}',
+    );
   });
 
   it("fails on a rule with no text to look for, since it would match every Transaction", () => {
@@ -122,6 +158,39 @@ describe("readRules", () => {
   });
 });
 
+describe("a Category named Subscriptions", () => {
+  // Subscriptions are a view across Categories, never a Category (ADR 0005).
+  const named = ["Subscriptions", "subscriptions", "  SUBSCRIPTIONS "];
+  const refusal =
+    'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
+
+  it("fails to load a rules file holding one, in any case or with surrounding spaces, saying how to fix it", () => {
+    for (const name of named) {
+      const contents = rulesFile({ categories: [food, { name, kind: "Spending", subcategories: ["Streaming"] }], rules: [] });
+      expect(() => readRules(contents)).toThrow(
+        'rules.json has a Category named Subscriptions, but Subscriptions is a view across Categories, not a Category. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": "Weekly", "Monthly" or "Yearly", then remove the Category',
+      );
+    }
+  });
+
+  it("refuses saving a rule that adds one, in any case or with surrounding spaces, saying to mark the rule as a Subscription", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    for (const name of named) {
+      const rule: RuleToSave = { contains: "STREAMING CO", category: name, subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } };
+      expect(() => withRule(contents, rule)).toThrow(refusal);
+    }
+  });
+
+  it("names the refusal for a rule that adds one, so the page can refuse it before saving, and nothing for any other rule", () => {
+    expect(subscriptionsRefusal({ contains: "STREAMING CO", category: " subscriptions", subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } })).toBe(refusal);
+    expect(
+      subscriptionsRefusal({ contains: "STREAMING CO", category: "Entertainment", subcategory: "Subscriptions", adds: { new: "Category", kind: "Spending" } }),
+    ).toBeUndefined();
+    expect(subscriptionsRefusal({ contains: "STREAMING CO", category: "Food", subcategory: "Groceries" })).toBeUndefined();
+    expect(subscriptionsRefusal({ contains: "CARD BILL", transfer: true })).toBeUndefined();
+  });
+});
+
 describe("categorise", () => {
   const rules = [
     { contains: "corner shop", category: "Food", subcategory: "Groceries" },
@@ -198,6 +267,21 @@ describe("withRule", () => {
         2,
       ) + "\n",
     );
+  });
+
+  it("keeps a declared Subscription's interval on the rule it saves, so it reads back the same", () => {
+    const contents = rulesFile({ categories: [food], rules: [{ contains: "CARD BILL", transfer: true }] });
+    const saved = withRule(contents, { contains: "veg box", category: "food", subcategory: "groceries", subscription: "Weekly" });
+    expect(readRules(saved).rules).toEqual([
+      { contains: "CARD BILL", transfer: true },
+      { contains: "veg box", category: "Food", subcategory: "Groceries", subscription: "Weekly" },
+    ]);
+  });
+
+  it("keeps a rule's not-a-Subscription mark when it saves, on that rule and on the rules already in the file", () => {
+    const rent = { contains: "LANDLORD", category: "Food", subcategory: "Groceries", subscription: false };
+    const saved = withRule(rulesFile({ categories: [food], rules: [rent] }), { contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: false });
+    expect(readRules(saved).rules).toEqual([rent, { contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: false }]);
   });
 
   it("fails when the rules file doesn't read cleanly, without quoting it", () => {
@@ -339,6 +423,17 @@ describe("markedNew", () => {
       category: "Food",
       subcategory: "Groceries",
     });
+  });
+
+  it("keeps a rule's subscription mark, whether its Category and Subcategory are existing or new", () => {
+    expect(marked({ contains: "VEG BOX", category: "food", subcategory: "groceries", subscription: "Weekly" })).toEqual({
+      contains: "VEG BOX",
+      category: "Food",
+      subcategory: "Groceries",
+      subscription: "Weekly",
+    });
+    expect(marked({ contains: "VEG BOX", category: "Food", subcategory: "Boxes", subscription: "Weekly" })).toMatchObject({ subscription: "Weekly" });
+    expect(marked({ contains: "VEG BOX", category: "Boxes", subcategory: "Veg", subscription: "Weekly" })).toMatchObject({ subscription: "Weekly" });
   });
 
   it("marks a Subcategory its Category doesn't have as new, under the Category as the rules file spells it", () => {

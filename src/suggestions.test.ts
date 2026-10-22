@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Category } from "./rules.js";
 import type { UncategorisedDescription } from "./spending.js";
 import type { Direction } from "./statements.js";
-import { aboutToSend, askForSuggestedRules, suggestedRules, suggestionRequest, type SuggestionRequest } from "./suggestions.js";
+import { aboutToSend, askForSuggestedRules, SUGGESTED_RULES_INSTRUCTIONS, SUGGESTED_RULES_SCHEMA, suggestedRules, suggestionRequest, type SuggestionRequest } from "./suggestions.js";
 
 // Made-up Uncategorised descriptions and Categories. Every description and figure is invented.
 const uncategorised = (description: string, direction: Direction, pence = 1000): UncategorisedDescription => ({
@@ -180,5 +180,32 @@ describe("askForSuggestedRules", () => {
     });
     await expect(asking).rejects.toThrow("Tick at least one description to ask Claude for Suggested Rules.");
     expect(asked).toBe(0);
+  });
+});
+
+describe("SUGGESTED_RULES_INSTRUCTIONS", () => {
+  it("tells Claude Subscriptions is not a Category and not to suggest one (ADR 0005)", () => {
+    expect(SUGGESTED_RULES_INSTRUCTIONS).toContain(
+      "Subscriptions is not a Category, so never suggest a Category named Subscriptions. Sort a subscription into a Category for what it is for, such as streaming or software.",
+    );
+  });
+});
+
+describe("what leaves the Mac", () => {
+  // A failing snapshot here means what is sent to Claude changed. Update ADR 0003 and the Suggest rules panel's privacy
+  // text to match, then accept the new snapshot with `npx vitest run -u`.
+  const updateAdr = "What is sent to Claude changed: update ADR 0003 and the Suggest rules privacy text";
+
+  it("sends the fixed instructions and response shape the ADR describes", () => {
+    expect({ instructions: SUGGESTED_RULES_INSTRUCTIONS, schema: SUGGESTED_RULES_SCHEMA }).toMatchSnapshot(updateAdr);
+  });
+
+  it("sends a request shaped as the ADR describes", () => {
+    const request = suggestionRequest({
+      uncategorised: [uncategorised("CORNER SHOP 0412", "Out")],
+      categories,
+      ticked: [{ description: "CORNER SHOP ####", direction: "Out" }],
+    });
+    expect(request).toMatchSnapshot(updateAdr);
   });
 });

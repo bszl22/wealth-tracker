@@ -40,7 +40,8 @@ describe("the page and its scripts", () => {
   it("serves scripts that import only other served scripts once their types are stripped", async () => {
     for (const path of Object.keys(SCRIPTS)) {
       const script = await (await get(path)).text();
-      const imported = [...script.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"/g)].map(([, from, bare]) => from ?? bare!);
+      // `from` only counts at the end of an import or export statement, so text such as "Earned more from" doesn't.
+      const imported = [...script.matchAll(/^(?:import|export)\b[^"]*?\bfrom\s*"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"/gm)].map(([, from, bare]) => from ?? bare!);
       for (const each of imported) expect(Object.keys(SCRIPTS), `${path} imports ${each}`).toContain(new URL(each, ORIGIN + path).pathname);
     }
   });
@@ -104,6 +105,45 @@ describe("/rules", () => {
     expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(rule))))).toEqual({ status: 200, body: { saved: true } });
     const { body } = await answer(await get("/report", tracker));
     expect(body.uncategorised.map(({ description }: { description: string }) => description)).not.toContain("MYSTERY MERCHANT LTD");
+  });
+
+  it("refuses a rule adding a Category named Subscriptions, saving nothing", async () => {
+    const tracker = madeUpTracker();
+    const subscriptions = { ...rule, category: "Subscriptions", subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } };
+    expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(subscriptions))))).toEqual({
+      status: 400,
+      body: {
+        error: 'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.',
+      },
+    });
+    const { body } = await answer(await get("/report", tracker));
+    expect(body.uncategorised.map(({ description }: { description: string }) => description)).toContain("MYSTERY MERCHANT LTD");
+  });
+
+  const subscriptionNames = async (tracker: Tracker) =>
+    (await answer(await get("/report", tracker))).body.subscriptions.subscriptions.map(({ name }: { name: string }) => name);
+
+  it("saves a Spending rule's subscription mark, so the next Report lists its Transactions as a Subscription", async () => {
+    const tracker = madeUpTracker();
+    const declared = { ...rule, subscription: "Yearly" };
+    expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(declared))))).toEqual({ status: 200, body: { saved: true } });
+    expect(await subscriptionNames(tracker)).toContain("Holidays (mystery)");
+  });
+
+  it("refuses a subscription mark on a Transfer or Earnings rule, or with an unknown interval, saving nothing", async () => {
+    const notSpending = "Only a rule sorting into a Spending Subcategory can be a Subscription, so the rule wasn't saved.";
+    for (const [sent, error] of [
+      [{ contains: "mystery", transfer: true, subscription: "Monthly" }, notSpending],
+      [{ contains: "mystery", category: "Work", subcategory: "Salary", subscription: "Monthly" }, notSpending],
+      [{ contains: "mystery", category: "Gifts", subcategory: "Friends", subscription: "Monthly", adds: { new: "Category", kind: "Earnings" } }, notSpending],
+      [{ contains: "mystery", category: "Work", subcategory: "Gifts", subscription: "Monthly", adds: { new: "Subcategory" } }, notSpending],
+      [{ ...rule, subscription: "Daily" }, 'The rule\'s "subscription" can only be "Weekly", "Monthly" or "Yearly", so it wasn\'t saved.'],
+    ] as const) {
+      const tracker = madeUpTracker();
+      expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(sent))))).toEqual({ status: 400, body: { error } });
+      const { body } = await answer(await get("/report", tracker));
+      expect(body.uncategorised.map(({ description }: { description: string }) => description)).toContain("MYSTERY MERCHANT LTD");
+    }
   });
 
   it("refuses a rule longer than any real one", async () => {

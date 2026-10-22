@@ -1,20 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { SUGGESTED_RULES_SCHEMA, type AskClaude } from "./suggestions.js";
+import { SUGGESTED_RULES_INSTRUCTIONS, SUGGESTED_RULES_SCHEMA, type AskClaude } from "./suggestions.js";
 
-// The one place the tracker talks to Claude (ADR 0003). Kept thin and untested: suggestions.ts builds what is sent and
-// reads what comes back. Its errors never quote descriptions, suggestions or the API key.
+// The one place the tracker talks to Claude (ADR 0003). Kept thin and untested: suggestions.ts builds what is sent,
+// with the instructions, and reads what comes back. Its errors never quote descriptions, suggestions or the API key.
 
 const MODEL = "claude-sonnet-5-5";
-
-const INSTRUCTIONS = `You suggest Categorisation Rules for a personal finance tracker. The user message is JSON holding descriptions of Transactions from the user's Statements that no rule matches yet, each with whether money came in or went out, and the user's Categories, each a Spending or Earnings Category with its Subcategories.
-
-A Categorisation Rule matches every description containing its "contains" text, ignoring case. For each rule you suggest:
-- Choose "contains" text that appears in at least one of the descriptions, short enough to cover variants of the same merchant or payer, such as leaving out store numbers and references, but not so short it catches unrelated descriptions. Runs of digits were masked as ####, so never include #### in "contains" text.
-- Prefer the user's existing Categories and Subcategories: use one of them, spelt exactly as given, with "transfer" false, whenever one fits. Or set "transfer" true, with "category" and "subcategory" empty, for money moving between the user's own Accounts, such as paying a credit card bill or moving money to savings.
-- Only when no existing Subcategory fits, name a new Subcategory of an existing Category, or, when no existing Category fits either, a new Category and one Subcategory of it. Keep new names short and general enough for other merchants or payers like it, and never name a new Category or Subcategory the same as an existing one. The user decides whether to add it.
-- Use a Spending Category for money going out and an Earnings Category for money coming in, unless money coming in is clearly a refund of earlier Spending. A new Category takes the kind of the money its rule catches.
-
-Suggest a rule only when you are fairly sure of it.`;
 
 /** Asks Claude, with `apiKey`, for Suggested Rules with exactly the request, giving the text of its response. */
 export function claudeWith(apiKey: string): AskClaude {
@@ -25,7 +15,7 @@ export function claudeWith(apiKey: string): AskClaude {
       message = await client.beta.messages.create({
         model: MODEL,
         max_tokens: 16000,
-        system: INSTRUCTIONS,
+        system: SUGGESTED_RULES_INSTRUCTIONS,
         messages: [{ role: "user", content: JSON.stringify(request) }],
         output_config: { format: { type: "json_schema", schema: SUGGESTED_RULES_SCHEMA } },
       });
