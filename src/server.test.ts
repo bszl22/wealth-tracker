@@ -120,6 +120,32 @@ describe("/rules", () => {
     expect(body.uncategorised.map(({ description }: { description: string }) => description)).toContain("MYSTERY MERCHANT LTD");
   });
 
+  const subscriptionNames = async (tracker: Tracker) =>
+    (await answer(await get("/report", tracker))).body.subscriptions.subscriptions.map(({ name }: { name: string }) => name);
+
+  it("saves a Spending rule's subscription mark, so the next Report lists its Transactions as a Subscription", async () => {
+    const tracker = madeUpTracker();
+    const declared = { ...rule, subscription: "Yearly" };
+    expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(declared))))).toEqual({ status: 200, body: { saved: true } });
+    expect(await subscriptionNames(tracker)).toContain("Holidays (mystery)");
+  });
+
+  it("refuses a subscription mark on a Transfer or Earnings rule, or with an unknown interval, saving nothing", async () => {
+    const notSpending = "Only a rule sorting into a Spending Subcategory can be a Subscription, so the rule wasn't saved.";
+    for (const [sent, error] of [
+      [{ contains: "mystery", transfer: true, subscription: "Monthly" }, notSpending],
+      [{ contains: "mystery", category: "Work", subcategory: "Salary", subscription: "Monthly" }, notSpending],
+      [{ contains: "mystery", category: "Gifts", subcategory: "Friends", subscription: "Monthly", adds: { new: "Category", kind: "Earnings" } }, notSpending],
+      [{ contains: "mystery", category: "Work", subcategory: "Gifts", subscription: "Monthly", adds: { new: "Subcategory" } }, notSpending],
+      [{ ...rule, subscription: "Daily" }, 'The rule\'s "subscription" can only be "Weekly", "Monthly" or "Yearly", so it wasn\'t saved.'],
+    ] as const) {
+      const tracker = madeUpTracker();
+      expect(await answer(await handle(tracker)(fromPage("/rules", JSON.stringify(sent))))).toEqual({ status: 400, body: { error } });
+      const { body } = await answer(await get("/report", tracker));
+      expect(body.uncategorised.map(({ description }: { description: string }) => description)).toContain("MYSTERY MERCHANT LTD");
+    }
+  });
+
   it("refuses a rule longer than any real one", async () => {
     const long = JSON.stringify({ ...rule, contains: "x".repeat(16_384) });
     expect(await answer(await handle()(fromPage("/rules", long)))).toEqual({ status: 413, body: { error: "The rule to save is too long." } });

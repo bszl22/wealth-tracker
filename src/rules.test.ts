@@ -407,6 +407,17 @@ describe("markedNew", () => {
     });
   });
 
+  it("keeps a rule's subscription mark, whether its Category and Subcategory are existing or new", () => {
+    expect(marked({ contains: "VEG BOX", category: "food", subcategory: "groceries", subscription: "Weekly" })).toEqual({
+      contains: "VEG BOX",
+      category: "Food",
+      subcategory: "Groceries",
+      subscription: "Weekly",
+    });
+    expect(marked({ contains: "VEG BOX", category: "Food", subcategory: "Boxes", subscription: "Weekly" })).toMatchObject({ subscription: "Weekly" });
+    expect(marked({ contains: "VEG BOX", category: "Boxes", subcategory: "Veg", subscription: "Weekly" })).toMatchObject({ subscription: "Weekly" });
+  });
+
   it("marks a Subcategory its Category doesn't have as new, under the Category as the rules file spells it", () => {
     expect(marked({ contains: "CORNER SHOP", category: "FOOD", subcategory: "Snacks" })).toEqual({
       contains: "CORNER SHOP",
