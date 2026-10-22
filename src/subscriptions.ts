@@ -13,7 +13,10 @@ export type Subscription = {
   usual: Pence;
   interval: SubscriptionInterval;
   lastCharge: IsoDate;
-  /** It charged within its interval plus the grace days before today: the last charge, plus the interval, plus the grace, is on or after today. */
+  /**
+   * It has not stopped charging, as far as its Account's Statements reach: its next charge, plus the grace days, falls after
+   * the latest Transaction date found for its Account. Today plays no part, so Statements behind today don't make it lapsed.
+   */
   current: boolean;
   /** The usual amount × 52, 12 or 1. */
   yearlyCost: Pence;
@@ -29,6 +32,7 @@ export type SubscriptionsInput = {
   categories: Category[];
   /** The Categorisation Rules, in the order the rules file lists them. */
   rules: CategorisationRule[];
+  /** Not used to judge current or lapsed, which goes by how far each Account's Statements reach. */
   today: IsoDate;
 };
 
@@ -37,7 +41,8 @@ export type SubscriptionsInput = {
  * that no rule matches, grouped by description. A group is a Subscription when its charges fall at a regular weekly,
  * monthly or yearly interval, each within 10% of its usual amount, with enough charges to show it repeats.
  */
-export function findSubscriptions({ transactions, categories, rules, today }: SubscriptionsInput): Subscriptions {
+export function findSubscriptions({ transactions, categories, rules }: SubscriptionsInput): Subscriptions {
+  const coveredTo = latestDateByAccount(transactions);
   const spendingCategories = new Set(categories.filter(({ kind }) => kind === "Spending").map(({ name }) => name));
   const groups = new Map<CategorisationRule | string, { name: string; transactions: Transaction[] }>();
   for (const transaction of transactions) {
@@ -51,7 +56,7 @@ export function findSubscriptions({ transactions, categories, rules, today }: Su
     groups.set(key, group);
   }
   const subscriptions = [...groups.values()]
-    .map(({ name, transactions }) => subscription(name, transactions, today))
+    .map(({ name, transactions }) => subscription(name, transactions, coveredTo.get(transactions[0]!.account)!))
     .filter((found): found is Subscription => found !== undefined)
     // A stable sort, so equal yearly costs keep the order found.
     .sort((a, b) => Number(b.current) - Number(a.current) || b.yearlyCost - a.yearlyCost);
@@ -69,8 +74,18 @@ const INTERVALS: { interval: SubscriptionInterval; gapDays: [min: number, max: n
 /** How many days after a Subscription's next charge is due it still counts as current. */
 const GRACE_DAYS = 7;
 
-/** The group's Subscription, or none when its charges don't repeat regularly for about the same amount. */
-function subscription(name: string, transactions: Transaction[], today: IsoDate): Subscription | undefined {
+/** The latest Transaction date found for each Account: how far its Statements reach. */
+function latestDateByAccount(transactions: Transaction[]): Map<string, IsoDate> {
+  const latest = new Map<string, IsoDate>();
+  for (const { account, date } of transactions) if (date > (latest.get(account) ?? "")) latest.set(account, date);
+  return latest;
+}
+
+/**
+ * The group's Subscription, or none when its charges don't repeat regularly for about the same amount. `coveredTo` is
+ * the latest Transaction date for the group's Account.
+ */
+function subscription(name: string, transactions: Transaction[], coveredTo: IsoDate): Subscription | undefined {
   const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
   // The middle charge, or the lower of the two middle ones, so the usual amount is one actually charged.
   const amounts = sorted.map(({ pence }) => pence).sort((a, b) => a - b);
@@ -82,7 +97,7 @@ function subscription(name: string, transactions: Transaction[], today: IsoDate)
   );
   if (!found) return undefined;
   const lastCharge = sorted.at(-1)!.date;
-  const current = addDays(nextDue(lastCharge, found.interval), GRACE_DAYS) >= today;
+  const current = addDays(nextDue(lastCharge, found.interval), GRACE_DAYS) > coveredTo;
   return { name, usual, interval: found.interval, lastCharge, current, yearlyCost: usual * found.perYear, transactions: sorted };
 }
 
