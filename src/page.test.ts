@@ -170,14 +170,19 @@ describe("the Subscriptions table", () => {
   it("lists current Subscriptions then lapsed, each largest yearly cost first, with the total yearly cost of current ones", () => {
     expect(rows(table())).toEqual([
       ["Subscription", "Interval", "Usual amount", "Last charge", "Status", "Yearly cost"],
-      ["Rent (LANDLORD)", "Monthly", "£1,250.00", "1 Jul 2026", "Current", "£15,000.00"],
       ["Streaming (STREAMFLIX)", "Monthly", "£10.99", "15 Jun 2026", "Current", "£131.88"],
       ["Holidays (TRAVEL COVER)", "Yearly", "£89.00", "3 Mar 2026", "Current", "£89.00"],
       ["Streaming (PHOTO CLOUD)", "Yearly", "£59.99", "8 Jul 2026", "Current", "£59.99"],
       ["Groceries (VEG BOX)", "Weekly", "£18.50", "23 Feb 2026", "Lapsed", "£962.00"],
       ["Streaming (MUSICBOX)", "Monthly", "£9.99", "20 Mar 2026", "Lapsed", "£119.88"],
-      ["Total yearly cost of current Subscriptions", "", "", "", "", "£15,280.87"],
+      ["Total yearly cost of current Subscriptions", "", "", "", "", "£280.87"],
     ]);
+  });
+
+  it("leaves out the rent, whose rule is marked as catching no Subscription, while it still counts under Home › Rent", () => {
+    expect(rows(table()).map(([name]) => name)).not.toContain("Rent (LANDLORD)");
+    const [spending] = document.querySelectorAll("table.months");
+    expect(rows(spending!).find(([label]) => label === "Rent")!.slice(1, 7)).toEqual(Array.from({ length: 6 }, () => "£1,250.00"));
   });
 
   it("says some Subscriptions are found from repeating charges and some declared on rules", () => {

@@ -23,6 +23,7 @@ const rules: CategorisationRule[] = [
   { contains: "STREAMFLIX", category: "Fun", subcategory: "Streaming" },
   { contains: "TRAVEL COVER", category: "Fun", subcategory: "Gym", subscription: "Yearly" },
   { contains: "FITNESS HUB", category: "Fun", subcategory: "Gym", subscription: "Monthly" },
+  { contains: "LETTING AGENT", category: "Fun", subcategory: "Gym", subscription: false },
   { contains: "EMPLOYER", category: "Work", subcategory: "Salary" },
   { contains: "SAVINGS POT", transfer: true },
 ];
@@ -56,6 +57,20 @@ describe("findSubscriptions", () => {
   it("lists a declared Subscription whose charges vary by more than 10%, with the middle charge as its usual amount", () => {
     const { subscriptions } = find([...charges("FITNESS HUB", 3000, ["2026-04-01"]), ...charges("FITNESS HUB", 4500, ["2026-05-01", "2026-06-01"])]);
     expect(subscriptions.map(({ usual, yearlyCost, declared }) => ({ usual, yearlyCost, declared }))).toEqual([{ usual: 4500, yearlyCost: 54000, declared: true }]);
+  });
+
+  it("never finds a Subscription for a rule marked as catching none, even when its charges repeat monthly for the same amount", () => {
+    const { subscriptions, currentYearlyCost } = find(charges("LETTING AGENT RENT", 125000, ["2026-03-01", "2026-04-01", "2026-05-01", "2026-06-01"]));
+    expect(subscriptions).toEqual([]);
+    expect(currentYearlyCost).toBe(0);
+  });
+
+  it("still finds a repeating description no rule matches alongside a rule marked as catching none", () => {
+    const { subscriptions } = find([
+      ...charges("LETTING AGENT RENT", 125000, ["2026-04-01", "2026-05-01", "2026-06-01"]),
+      ...charges("GAMEPASS MONTHLY", 799, ["2026-04-09", "2026-05-09", "2026-06-09"]),
+    ]);
+    expect(subscriptions.map(({ name, declared }) => ({ name, declared }))).toEqual([{ name: "GAMEPASS MONTHLY", declared: false }]);
   });
 
   it("finds weekly and yearly Subscriptions, with no rule named by their description", () => {

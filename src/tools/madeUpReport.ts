@@ -11,8 +11,8 @@ import { createTracker, type Tracker } from "../tracker.js";
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
 // July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, Uncategorised
 // descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, a
-// Stale Account, current and lapsed weekly, monthly and yearly Subscriptions, and a yearly Subscription declared on its
-// rule with a single charge.
+// Stale Account, current and lapsed weekly, monthly and yearly Subscriptions, a yearly Subscription declared on its
+// rule with a single charge, and monthly rent whose rule is marked as catching no Subscription.
 
 const TODAY: IsoDate = "2026-07-12";
 const FULL_MONTHS = [1, 2, 3, 4, 5, 6];
@@ -26,7 +26,7 @@ const categories: Category[] = [
 ];
 
 const rules: CategorisationRule[] = [
-  { contains: "LANDLORD", category: "Home", subcategory: "Rent" },
+  { contains: "LANDLORD", category: "Home", subcategory: "Rent", subscription: false },
   { contains: "POWER CO", category: "Home", subcategory: "Energy" },
   { contains: "SUPERMARKET", category: "Food", subcategory: "Groceries" },
   { contains: "CORNER CAFE", category: "Food", subcategory: "Eating Out" },
