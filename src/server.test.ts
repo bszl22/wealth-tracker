@@ -40,7 +40,8 @@ describe("the page and its scripts", () => {
   it("serves scripts that import only other served scripts once their types are stripped", async () => {
     for (const path of Object.keys(SCRIPTS)) {
       const script = await (await get(path)).text();
-      const imported = [...script.matchAll(/\bfrom\s*"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"/g)].map(([, from, bare]) => from ?? bare!);
+      // `from` only counts at the end of an import or export statement, so text such as "Earned more from" doesn't.
+      const imported = [...script.matchAll(/^(?:import|export)\b[^"]*?\bfrom\s*"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"/gm)].map(([, from, bare]) => from ?? bare!);
       for (const each of imported) expect(Object.keys(SCRIPTS), `${path} imports ${each}`).toContain(new URL(each, ORIGIN + path).pathname);
     }
   });

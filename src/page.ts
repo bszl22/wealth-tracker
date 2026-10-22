@@ -342,9 +342,18 @@ const SHOWN_CHANGES = 8;
 
 const signed = (pence: Pence) => (pence > 0 ? `+${gbp(pence)}` : pence < 0 ? `−${gbp(-pence)}` : gbp(0));
 
+/** The groups "What changed" sorts its changes into, by kind and whether the figure rose, in the order shown. */
+const CHANGE_GROUPS = [
+  { heading: "Spent more on", kind: "Spending", rose: true },
+  { heading: "Spent less on", kind: "Spending", rose: false },
+  { heading: "Earned more from", kind: "Earnings", rose: true },
+  { heading: "Earned less from", kind: "Earnings", rose: false },
+] as const;
+
 /**
- * "What changed" in the selected month: the Subcategories that moved most against the months before it, and its
- * largest Spending Transactions, each line listing its Transactions when clicked.
+ * "What changed" in the selected month: the Subcategories that moved most against the months before it, grouped by
+ * what the change means and each an unsigned amount, and its largest Spending Transactions, each line listing its
+ * Transactions when clicked.
  */
 function whatChangedPanel(months: ReportMonth[]) {
   return monthPanel(months, "What changed", (month) => monthLabel(month.monthEnd), (month, body) => {
@@ -359,21 +368,26 @@ function whatChangedPanel(months: ReportMonth[]) {
     const { comparedWith, changes, largest } = month.whatChanged;
     const panel = el("div", { class: "transactions-panel" });
     body.append(el("div", { class: "muted" }, `Against the average of ${comparedWith.map(monthLabel).join(", ")}. Click a figure to see its Transactions.`));
+    // The limit applies before grouping, and changes come largest first, so each group stays largest first.
     const moved = changes.filter((c) => c.change !== 0).slice(0, SHOWN_CHANGES);
     if (moved.length === 0) body.append(el("div", { class: "muted" }, "No Subcategory changed."));
-    else {
+    for (const { heading, kind, rose } of CHANGE_GROUPS) {
+      const group = moved.filter((c) => c.kind === kind && c.change > 0 === rose);
+      if (group.length === 0) continue;
       const table = el("table");
-      // The change sits next to its name, so it stays in view at phone width. Spending is the usual case, so only Earnings is labelled.
-      table.append(headerRow([["Subcategory"], ["Change", "balance"], [monthLabel(month.monthEnd), "balance"], ["Average", "balance"]]));
-      for (const { kind, category, subcategory, pence, average, change, transactions } of moved) {
-        const name = `${category ? `${category} › ${subcategory}` : subcategory}${kind === "Earnings" ? " (Earnings)" : ""}`;
+      // The change sits next to its name, so it stays in view at phone width.
+      table.append(headerRow([["Subcategory"], ["Change", "balance"], [monthLabel(month.monthEnd), "balance"], ["Usual", "balance"]]));
+      for (const { category, subcategory, pence, average, change, transactions } of group) {
+        const name = category ? `${category} › ${subcategory}` : subcategory;
         const changeCell = el("td", { class: "balance" });
-        changeCell.append(figureButton(signed(change), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, directionOf(kind), panel));
+        changeCell.append(figureButton(gbp(Math.abs(change)), `${name}, ${monthLabel(month.monthEnd)}: ${gbp(pence)}`, transactions, directionOf(kind), panel));
         const row = el("tr");
         row.append(el("td", {}, name), changeCell, el("td", { class: "balance" }, gbp(pence)), el("td", { class: "balance" }, gbp(average)));
         table.append(row);
       }
-      body.append(scrolling(table));
+      const changesEl = el("div", { class: "changes" });
+      changesEl.append(el("h3", {}, heading), scrolling(table));
+      body.append(changesEl);
     }
     if (largest.length > 0) {
       const table = el("table");
@@ -822,7 +836,7 @@ function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscription
     section.append(el("div", { class: "muted" }, "No Spending repeats weekly, monthly or yearly for about the same amount yet."));
     return section;
   }
-  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly for about the same amount, found from your Transactions, which keep their own Categories. Current means it charged within its interval plus 7 days. Click a yearly cost to see its Transactions."));
+  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly for about the same amount, found from your Transactions, which keep their own Categories. Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed. Click a yearly cost to see its Transactions."));
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table");
   table.append(headerRow([["Subscription"], ["Interval"], ["Usual amount", "balance"], ["Last charge"], ["Status"], ["Yearly cost", "balance"]]));
