@@ -1,4 +1,4 @@
-import { categorise, type Category, type CategorisationRule, type SubscriptionInterval } from "./rules.js";
+import { categorise, SUBSCRIPTION_INTERVALS, type Category, type CategorisationRule, type SubscriptionInterval } from "./rules.js";
 import type { Transaction } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 
@@ -72,11 +72,11 @@ export function findSubscriptions({ transactions, categories, rules }: Subscript
 }
 
 /** Each interval: the days between charges it allows, the fewest charges that show it repeats, and charges a year. */
-const INTERVALS: { interval: SubscriptionInterval; gapDays: [min: number, max: number]; fewestCharges: number; perYear: number }[] = [
-  { interval: "Weekly", gapDays: [5, 9], fewestCharges: 3, perYear: 52 },
-  { interval: "Monthly", gapDays: [25, 35], fewestCharges: 3, perYear: 12 },
-  { interval: "Yearly", gapDays: [350, 380], fewestCharges: 2, perYear: 1 },
-];
+const INTERVALS: Record<SubscriptionInterval, { gapDays: [min: number, max: number]; fewestCharges: number; perYear: number }> = {
+  Weekly: { gapDays: [5, 9], fewestCharges: 3, perYear: 52 },
+  Monthly: { gapDays: [25, 35], fewestCharges: 3, perYear: 12 },
+  Yearly: { gapDays: [350, 380], fewestCharges: 2, perYear: 1 },
+};
 
 /** How many days after a Subscription's next charge is due it still counts as current. */
 const GRACE_DAYS = 7;
@@ -97,19 +97,22 @@ function subscription(name: string, transactions: Transaction[], declared: Subsc
   // The middle charge, or the lower of the two middle ones, so the usual amount is one actually charged.
   const amounts = sorted.map(({ pence }) => pence).sort((a, b) => a - b);
   const usual = amounts[Math.floor((amounts.length - 1) / 2)]!;
-  const found = declared ? INTERVALS.find(({ interval }) => interval === declared) : detected(sorted, usual);
-  if (!found) return undefined;
+  const interval = declared ?? detected(sorted, usual);
+  if (!interval) return undefined;
   const lastCharge = sorted.at(-1)!.date;
-  const current = addDays(nextDue(lastCharge, found.interval), GRACE_DAYS) > coveredTo;
-  const yearlyCost = usual * found.perYear;
-  return { name, usual, interval: found.interval, lastCharge, current, yearlyCost, declared: declared !== undefined, transactions: sorted };
+  const current = addDays(nextDue(lastCharge, interval), GRACE_DAYS) > coveredTo;
+  const yearlyCost = usual * INTERVALS[interval].perYear;
+  return { name, usual, interval, lastCharge, current, yearlyCost, declared: declared !== undefined, transactions: sorted };
 }
 
 /** The interval charges in date order repeat at, each within 10% of the usual amount, or none. */
-function detected(sorted: Transaction[], usual: Pence) {
+function detected(sorted: Transaction[], usual: Pence): SubscriptionInterval | undefined {
   if (sorted.some(({ pence }) => Math.abs(pence - usual) * 10 > usual)) return undefined;
   const gaps = sorted.slice(1).map(({ date }, i) => daysBetween(sorted[i]!.date, date));
-  return INTERVALS.find(({ gapDays: [min, max], fewestCharges }) => sorted.length >= fewestCharges && gaps.every((gap) => gap >= min && gap <= max));
+  return SUBSCRIPTION_INTERVALS.find((interval) => {
+    const { gapDays: [min, max], fewestCharges } = INTERVALS[interval];
+    return sorted.length >= fewestCharges && gaps.every((gap) => gap >= min && gap <= max);
+  });
 }
 
 /** When the charge after one on `date` is due: a week, a calendar month or a calendar year later, on the month's last day if it is shorter. */

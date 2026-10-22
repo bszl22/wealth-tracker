@@ -1,6 +1,6 @@
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import { directionOf, kindFor, kindOf, markedNew, previewRule, sortsIntoSpending, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave, type SubscriptionInterval } from "./rules.js";
+import { directionOf, kindFor, kindOf, markedNew, previewRule, sortsIntoSpending, SUBSCRIPTION_INTERVALS, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave, type SubscriptionInterval } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
@@ -385,9 +385,9 @@ function whatChangedPanel(months: ReportMonth[]) {
         row.append(el("td", {}, name), changeCell, el("td", { class: "balance" }, gbp(pence)), el("td", { class: "balance" }, gbp(average)));
         table.append(row);
       }
-      const changesEl = el("div", { class: "changes" });
-      changesEl.append(el("h3", {}, heading), scrolling(table));
-      body.append(changesEl);
+      const groupSection = el("div", { class: "changes" });
+      groupSection.append(el("h3", {}, heading), scrolling(table));
+      body.append(groupSection);
     }
     if (largest.length > 0) {
       const table = el("table");
@@ -513,6 +513,19 @@ function opener(text: string, rows: HTMLElement[]) {
 }
 
 /**
+ * A collapsed One-offs group: its line, with `before` and `after` around the opener naming how many there are, then
+ * `rows`, each marked as a One-off and hidden until the opener opens them.
+ */
+function oneOffsGroup(rows: HTMLElement[], before: HTMLElement[], after: HTMLElement[]) {
+  for (const row of rows) row.classList.add("one-off");
+  const name = el("td");
+  name.append(opener(oneOffCount(rows.length), rows));
+  const line = el("tr", { class: "one-offs" });
+  line.append(...before, name, ...after);
+  return [line, ...rows];
+}
+
+/**
  * Uncategorised descriptions, the repeating ones first, largest total first, then each direction's One-offs collapsed
  * into one line with their count and total, which opens into their rows. Each row lists its Transactions when clicked,
  * and has a form to make a Categorisation Rule from it.
@@ -549,17 +562,11 @@ function uncategorisedList(report: Report) {
   table.append(...repeating.map(descriptionRow));
   for (const { direction, descriptions } of oneOffs) {
     const kind = kindOf(direction);
-    const rows = descriptions.map(descriptionRow);
-    for (const row of rows) row.classList.add("one-off");
     const pence = descriptions.reduce((sum, u) => sum + u.pence, 0);
     const transactions = descriptions.flatMap((u) => u.transactions);
-    const name = el("td");
-    name.append(opener(oneOffCount(descriptions.length), rows));
     const total = el("td", { class: "balance" });
     total.append(figureButton(gbp(pence), `One-offs, Uncategorised ${kind}: ${gbp(pence)}`, transactions, direction, panel));
-    const line = el("tr", { class: "one-offs" });
-    line.append(name, el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, el("td"));
-    table.append(line, ...rows);
+    table.append(...oneOffsGroup(descriptions.map(descriptionRow), [], [el("td", {}, kind), el("td", { class: "balance" }, String(transactions.length)), total, el("td")]));
   }
   section.append(scrolling(table), rulePanel, panel, suggestRules(report));
   return section;
@@ -595,9 +602,9 @@ function suggestRules(report: Report) {
     el("h3", {}, "Suggest rules"),
     el("div", { class: "muted" }, "Claude can suggest Categorisation Rules for these descriptions. Only this list and your Category and Subcategory names leave your Mac, and only when you press Suggest rules: each description once, with every run of 4 or more digits masked as ####, and whether money came in or went out. Untick any you'd rather not send."),
   );
-  if (toSort(uncategorised).oneOffs.length > 0) section.append(el("div", { class: "muted" }, "One-offs start unticked. Tick them all at once, or open them to tick each."));
-  // A row is a One-off when every description it is sent for is one, so a masked description that repeats is not.
   const { repeating, oneOffs } = toSort(uncategorised);
+  if (oneOffs.length > 0) section.append(el("div", { class: "muted" }, "One-offs start unticked. Tick them all at once, or open them to tick each."));
+  // A row is a One-off when every description it is sent for is one, so a masked description that repeats is not.
   const sentKey = ({ description, direction }: SentDescription) => [direction, description].join("\n");
   const repeatingKeys = new Set(aboutToSend(repeating).map(sentKey));
   const sendable = aboutToSend([...repeating, ...oneOffs.flatMap(({ descriptions }) => descriptions)]);
@@ -636,15 +643,9 @@ function suggestRules(report: Report) {
       }
       showGroup();
     });
-    const rows = oneOffRows.map(({ row }) => row);
-    for (const row of rows) row.classList.add("one-off");
     const groupCell = el("td");
     groupCell.append(group);
-    const name = el("td");
-    name.append(opener(oneOffCount(sentOneOffs.length), rows));
-    const line = el("tr", { class: "one-offs" });
-    line.append(groupCell, name, el("td"));
-    table.append(line, ...rows);
+    table.append(...oneOffsGroup(oneOffRows.map(({ row }) => row), [groupCell], [el("td")]));
   }
   const button = el("button", { type: "button" }, "Suggest rules");
   const status = el("div", { class: "sent muted", "aria-live": "polite" });
@@ -656,7 +657,7 @@ function suggestRules(report: Report) {
     button.disabled = true;
     error.hidden = true;
     status.textContent = `Asking Claude about ${sending.length} description${sending.length === 1 ? "" : "s"}…`;
-    const response = await post<SuggestResponse>("/suggestions", { ticked: sending },"The tracker isn't responding, so nothing was suggested. Is it still running?");
+    const response = await post<SuggestResponse>("/suggestions", { ticked: sending }, "The tracker isn't responding, so nothing was suggested. Is it still running?");
     button.disabled = false;
     if ("error" in response) {
       status.textContent = "";
@@ -845,7 +846,7 @@ function subscriptionFields() {
   const tickboxLabel = el("label", { class: "tickbox" });
   tickboxLabel.append(tickbox, "This is a Subscription");
   const interval = el("select", { name: "interval" });
-  (["Weekly", "Monthly", "Yearly"] satisfies SubscriptionInterval[]).forEach((i) => interval.append(el("option", { value: i }, i)));
+  for (const i of SUBSCRIPTION_INTERVALS) interval.append(el("option", { value: i }, i));
   interval.value = "Monthly";
   const intervalLabel = labelled("Interval", interval);
   const declared = () => !tickboxLabel.hidden && tickbox.checked;
@@ -902,11 +903,11 @@ function ruleForm(
   const adding = () => choices[Number(then.value)]?.adds;
   then.addEventListener("change", () => newName.show(adding()));
   newName.show(adding());
-  const subscription = subscriptionFields();
+  const subscriptionMark = subscriptionFields();
   const chosenRule = () => (then.value === "" ? undefined : choices[Number(then.value)]?.rule(text.value));
   const showSubscription = () => {
     const rule = chosenRule();
-    subscription.show(rule !== undefined && sortsIntoSpending(rule, categories));
+    subscriptionMark.show(rule !== undefined && sortsIntoSpending(rule, categories));
   };
   // Captured, so a change to any field the rule depends on is seen here whether or not the change event bubbles.
   form.addEventListener("change", showSubscription, true);
@@ -926,7 +927,7 @@ function ruleForm(
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
     const missing = newName.missing(adding());
     if (missing) return fail(missing);
-    const declared = subscription.mark();
+    const declared = subscriptionMark.mark();
     const named = chosen.rule(text.value);
     const rule = declared && !("transfer" in named) ? { ...named, subscription: declared } : named;
     const refusal = subscriptionsRefusal(rule);
@@ -947,7 +948,7 @@ function ruleForm(
     labelled("Description contains", text),
     labelled("Sort into", then),
     ...newName.fields,
-    ...subscription.fields,
+    ...subscriptionMark.fields,
     preview,
     el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
     error,
