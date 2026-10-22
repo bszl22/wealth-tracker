@@ -122,7 +122,7 @@ describe("the Report and To sort tabs", () => {
     tab("To sort").click();
     const toSort = tabPanel("To sort");
     expect([...toSort.querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent)).toEqual([
-      "MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988",
+      "MYSTERY MERCHANT LTD", "CITY PARKING 20417", "CITY PARKING 20988", "PAYMENT FROM A FRIEND",
     ]);
     toSort.querySelector<HTMLButtonElement>(".make-rule")!.click();
     expect(toSort.querySelector("form.rule")).not.toBeNull();
@@ -143,7 +143,7 @@ describe("the Report and To sort tabs", () => {
     await vi.waitFor(() => expect(toSortLine().textContent).toBe("3 Uncategorised descriptions to sort."));
     expect(showing()).toEqual({ selected: ["To sort"], report: false, toSort: true });
     expect([...tabPanel("To sort").querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent)).toEqual([
-      "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988",
+      "CITY PARKING 20417", "CITY PARKING 20988", "PAYMENT FROM A FRIEND",
     ]);
     const [spending] = tabPanel("Report").querySelectorAll("table.months");
     expect(rows(spending!).find(([label]) => label === "Holidays")![5]).toBe("£1,609.00");
@@ -157,6 +157,61 @@ describe("the Report and To sort tabs", () => {
     expect(toSortLine().textContent).toBe("Nothing to sort: every Transaction is sorted into a Category or marked as a Transfer.");
     expect(toSortLine().querySelector("button")).toBeNull();
   });
+});
+
+describe("One-offs in To sort", () => {
+  const list = () => tabPanel("To sort").querySelector(".uncategorised-list table")!;
+  /** The Uncategorised rows showing, as their cells' text, without the header or the Make rule column. */
+  const shownRows = () => [...list().querySelectorAll<HTMLTableRowElement>("tr")].slice(1).filter((row) => !row.hidden).map((row) => [...row.cells].slice(0, 4).map((cell) => cell.textContent!.trim()));
+  const oneOffsLine = (kind: "Spending" | "Earnings") => [...list().querySelectorAll<HTMLTableRowElement>("tr.one-offs")].find((row) => row.cells[1]!.textContent === kind)!;
+
+  beforeAll(() => showPage());
+
+  it("lists the repeating descriptions first, then one collapsed One-offs line per direction with their count and total", () => {
+    expect(shownRows()).toEqual([
+      ["MYSTERY MERCHANT LTD", "Spending", "2", "£196.00"],
+      ["2 One-offs", "Spending", "2", "£9.00"],
+      ["1 One-off", "Earnings", "1", "£45.00"],
+    ]);
+  });
+
+  it("opens a One-offs line into a row for each One-off", () => {
+    oneOffsLine("Spending").querySelector("button")!.click();
+    expect(shownRows()).toEqual([
+      ["MYSTERY MERCHANT LTD", "Spending", "2", "£196.00"],
+      ["2 One-offs", "Spending", "2", "£9.00"],
+      ["CITY PARKING 20417", "Spending", "1", "£4.50"],
+      ["CITY PARKING 20988", "Spending", "1", "£4.50"],
+      ["1 One-off", "Earnings", "1", "£45.00"],
+    ]);
+    oneOffsLine("Spending").querySelector("button")!.click();
+    expect(shownRows().map(([description]) => description)).toEqual(["MYSTERY MERCHANT LTD", "2 One-offs", "1 One-off"]);
+  });
+
+  it("makes a rule from a One-off as from any row", async () => {
+    oneOffsLine("Earnings").querySelector("button")!.click();
+    const row = [...list().querySelectorAll("tr")].find((r) => r.querySelector("td.description")?.textContent === "PAYMENT FROM A FRIEND")!;
+    [...row.querySelectorAll("button")].find((b) => b.textContent === "Make rule")!.click();
+    const form = tabPanel("To sort").querySelector<HTMLFormElement>("form.rule")!;
+    expect(form.querySelector<HTMLInputElement>('input[name="contains"]')!.value).toBe("PAYMENT FROM A FRIEND");
+    const select = form.querySelector<HTMLSelectElement>('select[name="then"]')!;
+    select.value = [...select.options].find((option) => option.textContent === "Transfer")!.value;
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(toSortLine().textContent).toBe("3 Uncategorised descriptions to sort."));
+    expect(shownRows().map(([description]) => description)).toEqual(["MYSTERY MERCHANT LTD", "2 One-offs"]);
+  });
+
+  it("shows no One-offs line when there are no One-offs", async () => {
+    const tracker = madeUpTracker();
+    await tracker.saveRule({ contains: "CITY PARKING", category: "Fun", subcategory: "Holidays" });
+    await tracker.saveRule({ contains: "FRIEND", transfer: true });
+    await showPage(tracker);
+    expect(shownRows()).toEqual([["MYSTERY MERCHANT LTD", "Spending", "2", "£196.00"]]);
+    expect(tabPanel("To sort").querySelector(".one-offs")).toBeNull();
+    expect(tabPanel("To sort").textContent).not.toContain("One-off");
+  });
+
+  afterAll(() => showPage());
 });
 
 describe("the Subscriptions table", () => {
@@ -286,7 +341,7 @@ describe("making a rule from an Uncategorised row", () => {
   };
 
   it("opens a form with the row's description as editable \"contains\" text", () => {
-    expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]);
+    expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "CITY PARKING 20417", "CITY PARKING 20988", "PAYMENT FROM A FRIEND"]);
     const form = makeRule("MYSTERY MERCHANT LTD");
     expect(contains(form).value).toBe("MYSTERY MERCHANT LTD");
   });
@@ -324,7 +379,7 @@ describe("making a rule from an Uncategorised row", () => {
     const select = choice(form);
     select.value = [...select.options].find((option) => option.textContent === "Fun › Holidays")!.value;
     form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
-    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["CITY PARKING 20417", "CITY PARKING 20988", "PAYMENT FROM A FRIEND"]));
     const [spending] = document.querySelectorAll("table.months");
     expect(rows(spending!).find(([label]) => label === "Uncategorised")!.slice(1, 7)).toEqual(["£0.00", "£0.00", "£0.00", "£9.00", "£0.00", "£0.00"]);
   });
@@ -403,22 +458,58 @@ const suggestButton = () => [...suggest().querySelectorAll("button")].find((b) =
 
 describe("the about-to-send list for Suggested Rules", () => {
   const tickboxes = () => [...suggest().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+  const oneOffsGroup = () => suggest().querySelector<HTMLTableRowElement>("tr.one-offs")!;
+  const oneOffRows = () => [...suggest().querySelectorAll<HTMLTableRowElement>("tr.one-off")];
 
   beforeAll(() => showPage({ apiKeySet: true }));
 
   it("lists each distinct Uncategorised description once, masked exactly as it would be sent, with its direction, and no Transfers", () => {
     expect(rows(suggest().querySelector("table")!).slice(1).map(([, description, direction]) => [description, direction])).toEqual([
       ["MYSTERY MERCHANT LTD", "Money out"],
-      ["PAYMENT FROM A FRIEND", "Money in"],
+      ["2 One-offs", ""],
       ["CITY PARKING ####", "Money out"],
+      ["PAYMENT FROM A FRIEND", "Money in"],
     ]);
     expect(suggest().textContent).not.toContain("THANK YOU");
   });
 
-  it("starts with every row ticked", () => {
-    expect(tickboxes().map((box) => box.checked)).toEqual([true, true, true]);
+  it("starts with the repeating descriptions ticked and the One-offs unticked, behind one collapsed group", () => {
+    expect(tickboxes().map((box) => [box.getAttribute("aria-label"), box.checked])).toEqual([
+      ["Send MYSTERY MERCHANT LTD", true],
+      ["Send all One-offs", false],
+      ["Send CITY PARKING ####", false],
+      ["Send PAYMENT FROM A FRIEND", false],
+    ]);
+    expect(oneOffRows().map((row) => row.hidden)).toEqual([true, true]);
+    oneOffsGroup().querySelector("button")!.click();
+    expect(oneOffRows().map((row) => row.hidden)).toEqual([false, false]);
   });
 
+  it("ticks and unticks every One-off with the group tickbox", () => {
+    const [, group, parking, friend] = tickboxes();
+    group!.click();
+    expect([group!.checked, parking!.checked, friend!.checked]).toEqual([true, true, true]);
+    group!.click();
+    expect([group!.checked, parking!.checked, friend!.checked]).toEqual([false, false, false]);
+  });
+
+  it("ticks a single One-off on its own, showing the group as partly ticked", () => {
+    const [mystery, group, parking, friend] = tickboxes();
+    friend!.click();
+    expect([mystery!.checked, parking!.checked, friend!.checked]).toEqual([true, false, true]);
+    expect([group!.checked, group!.indeterminate]).toEqual([false, true]);
+    parking!.click();
+    expect([group!.checked, group!.indeterminate]).toEqual([true, false]);
+  });
+
+  it("shows no One-offs group when there are no One-offs", async () => {
+    const tracker = madeUpTracker();
+    await tracker.saveRule({ contains: "CITY PARKING", category: "Fun", subcategory: "Holidays" });
+    await tracker.saveRule({ contains: "FRIEND", transfer: true });
+    await showPage(tracker);
+    expect(rows(suggest().querySelector("table")!).slice(1).map(([, description]) => description)).toEqual(["MYSTERY MERCHANT LTD"]);
+    expect(suggest().querySelector(".one-offs")).toBeNull();
+  });
 });
 
 describe("asking Claude for Suggested Rules", () => {
@@ -434,7 +525,10 @@ describe("asking Claude for Suggested Rules", () => {
     const row = [...suggest().querySelectorAll(".suggested tr")].find((r) => r.querySelector("td")?.textContent === contains)!;
     return [...row.querySelectorAll("button")].find((b) => b.textContent === label)!;
   };
-  const askClaude = async () => {
+  const oneOffsTickbox = () => suggest().querySelector<HTMLInputElement>('input[aria-label="Send all One-offs"]')!;
+  /** Presses Suggest rules, having ticked the One-offs too unless told not to. */
+  const askClaude = async ({ oneOffs = true } = {}) => {
+    if (oneOffs && !oneOffsTickbox().checked) oneOffsTickbox().click();
     suggestButton().click();
     await vi.waitFor(() => expect(suggest().querySelector(".suggested table")).not.toBeNull());
   };
@@ -447,8 +541,9 @@ describe("asking Claude for Suggested Rules", () => {
 
   it("sends nothing until Suggest rules is pressed, then asks once with only the ticked rows, masked, and the Categories", async () => {
     expect(asked).toEqual([]);
+    oneOffsTickbox().click();
     tickboxes()[2]!.click();
-    await askClaude();
+    await askClaude({ oneOffs: false });
     expect(fetched.filter((url) => url === "/suggestions")).toHaveLength(1);
     expect(asked).toEqual([
       {
@@ -465,6 +560,13 @@ describe("asking Claude for Suggested Rules", () => {
         ],
       },
     ]);
+  });
+
+  it("sends none of the One-offs while they are left unticked", async () => {
+    await showPage({ claude: recordingClaude });
+    asked.length = 0;
+    await askClaude({ oneOffs: false });
+    expect(asked.map(({ descriptions }) => descriptions)).toEqual([[{ description: "MYSTERY MERCHANT LTD", direction: "Out" }]]);
   });
 
   it("shows Suggested Rules using existing Subcategories, Transfer or a Category marked as new, each with how many Uncategorised descriptions it catches and their total", async () => {
@@ -490,7 +592,7 @@ describe("asking Claude for Suggested Rules", () => {
     await showPage({ claude: recordingClaude });
     await askClaude();
     suggestedButton("MYSTERY MERCHANT", "Approve").click();
-    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988"]));
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["CITY PARKING 20417", "CITY PARKING 20988", "PAYMENT FROM A FRIEND"]));
     expect(fetched.slice(-2)).toEqual(["/rules", "/report"]);
     expect(suggestedRows().map(([contains]) => contains)).toEqual(["FRIEND", "CITY PARKING"]);
   });
@@ -573,13 +675,13 @@ describe("asking Claude for Suggested Rules", () => {
     });
     await askClaude();
     suggestedButton("CITY PARKING 20417", "Approve").click();
-    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20988"]));
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "CITY PARKING 20988", "PAYMENT FROM A FRIEND"]));
     expect(suggestedRows().map(([contains, sortInto]) => [contains, sortInto])).toEqual([
       ["CITY PARKING 20988", "Transport › Parking"],
       ["MYSTERY", "Transport › Taxis (new Subcategory)"],
     ]);
     suggestedButton("MYSTERY", "Approve").click();
-    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["PAYMENT FROM A FRIEND", "CITY PARKING 20988"]));
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["CITY PARKING 20988", "PAYMENT FROM A FRIEND"]));
     expect(spendingLabels()).toContain("Taxis");
   });
 

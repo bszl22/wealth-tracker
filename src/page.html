@@ -57,7 +57,7 @@
   tr.net td, tr.total td { font-weight: 600; border-top: 2px solid var(--grid); }
   tr.subcategory td { color: var(--muted); font-size: 14px; }
   .new { color: var(--assets); font-weight: 600; }
-  tr.subcategory td:first-child { padding-left: 24px; }
+  tr.subcategory td:first-child, .uncategorised-list tr.one-off td:first-child, .suggest-rules tr.one-off td:nth-child(2) { padding-left: 24px; }
   button.expand { all: unset; cursor: pointer; }
   button.expand::before { content: "▸"; display: inline-block; width: 16px; color: var(--muted); }
   button.expand[aria-expanded="true"]::before { content: "▾"; }
@@ -74,6 +74,7 @@
   .suggest-rules { margin-top: 24px; }
   .suggest-rules h3 { font-size: 15px; margin: 0 0 4px; }
   .suggest-rules button { margin-top: 12px; font: inherit; padding: 4px 12px; }
+  .suggest-rules button.expand { margin-top: 0; padding: 0; }
   .suggest-rules .error { margin-top: 12px; }
   .suggested h3 { margin-top: 24px; }
   .suggested td.buttons { white-space: nowrap; }
