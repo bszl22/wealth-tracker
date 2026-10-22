@@ -2,9 +2,9 @@ import { startServer } from "../server.js";
 import { madeUpTracker } from "./madeUpReport.js";
 
 // Serves the page with the made-up Report, so screenshots never show real figures. Rules saved on the page go into
-// the made-up rules file in memory, and are gone when it stops.
+// the made-up rules file in memory, and are gone when it stops. PORT picks another port, so several can run at once.
 
-const PORT = 4400;
+const PORT = Number(process.env.PORT ?? 4400);
 
 try {
   await startServer(madeUpTracker(), PORT);

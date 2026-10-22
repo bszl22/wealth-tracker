@@ -26,4 +26,8 @@ The Net Worth and Spending calculators take Balances and Transactions as `reconc
 
 ## Data leaving the Mac
 
-`SuggestionRequest` in `src/suggestions.ts` and the call in `src/claude.ts` send only what ADR 0003 lists, to the model the spec names. A change to either updates ADR 0003 and the Suggest rules panel's privacy text in the same change. Flag any option that can route the request to another model or destination, such as a server-side fallback.
+`SuggestionRequest` in `src/suggestions.ts` and the call in `src/claude.ts` send only what ADR 0003 lists, to the model the spec names. The "what leaves the Mac" snapshots in `src/suggestions.test.ts` fail when the request, instructions or response shape change; check that a change updating them also updates ADR 0003 and the Suggest rules panel's privacy text. Flag any option that can route the request to another model or destination, such as a server-side fallback.
+
+## Page tests and the made-up Report
+
+Page tests share the made-up Report from `src/tools/madeUpReport.ts`, so a test that checks a figure summed over the whole Report, such as Net Worth or a month's "What changed" rows, breaks whenever another change adds made-up data. Flag a new assertion on such a figure when one scoped to the behaviour under test would prove the same thing, such as the row for the description or Subcategory the test is about.
