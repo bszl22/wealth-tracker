@@ -42,7 +42,7 @@ export type SubscriptionsInput = {
 /**
  * The Subscriptions among the Spending: money out that a Spending Category's rule matches, grouped by that rule, or
  * that no rule matches, grouped by description. A group whose rule declares a Subscription is one from its first charge,
- * at the interval the rule states. Any other group is a Subscription when its charges fall at a regular weekly, monthly
+ * at the interval the rule states, and a group whose rule is marked as catching none is never one. Any other group is a Subscription when its charges fall at a regular weekly, monthly
  * or yearly interval, each within 10% of its usual amount, with enough charges to show it repeats.
  */
 export function findSubscriptions({ transactions, categories, rules }: SubscriptionsInput): Subscriptions {
@@ -53,9 +53,11 @@ export function findSubscriptions({ transactions, categories, rules }: Subscript
     if (transaction.direction !== "Out") continue;
     const rule = categorise(rules, transaction);
     if (rule && !("category" in rule && spendingCategories.has(rule.category))) continue;
+    // A rule marked as catching no Subscription keeps its Transactions out, however regularly they repeat.
+    const declared = rule && "category" in rule ? rule.subscription : undefined;
+    if (declared === false) continue;
     const key = rule ?? transaction.description;
     const name = rule && "category" in rule ? `${rule.subcategory} (${rule.contains})` : transaction.description;
-    const declared = rule && "category" in rule ? rule.subscription : undefined;
     const group = groups.get(key) ?? { name, declared, transactions: [] };
     group.transactions.push(transaction);
     groups.set(key, group);
