@@ -4,6 +4,8 @@ Transactions are categorised by Categorisation Rules you own. For Uncategorised 
 
 Direction is sent because without it Claude can't tell a Spending Category from an Earnings one for the same description. A suggestion's "contains" text is checked locally against the real, unmasked descriptions, and one that matches none is dropped.
 
+The fixed instructions sent with every request carry no data of yours. Besides asking Claude to prefer your Categories, they say that Subscriptions is not a Category, so Claude never suggests one named Subscriptions and sorts a subscription into a Category for what it is for (ADR 0005).
+
 ## Considered Options
 
 - Rules only, with no AI. Fully local, but slow to set up for hundreds of merchants.

@@ -294,6 +294,33 @@ describe("What changed", () => {
     ]);
   });
 
+  it("shows only the 8 largest changes across every group, so the smallest in each group can be left out", async () => {
+    const tracker = madeUpTracker();
+    // Ten invented Spending changes, largest first, alternating between rising and falling.
+    const changes = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100].map((size, i) => ({
+      kind: "Spending" as const,
+      category: "Fun",
+      subcategory: `Made-up ${i + 1}`,
+      pence: 5000 + (i % 2 === 0 ? size : -size),
+      average: 5000,
+      change: i % 2 === 0 ? size : -size,
+      transactions: [],
+    }));
+    await showPage({
+      ...tracker,
+      report: async () => {
+        const report = await tracker.report();
+        return { ...report, months: report.months.map((m) => (m.whatChanged && m.monthEnd.startsWith("2026-04") ? { ...m, whatChanged: { ...m.whatChanged, changes } } : m)) };
+      },
+    });
+    select("Apr 26");
+    expect(groups().map(([heading, table]) => [heading, (table as string[][]).slice(1).map(([name, change]) => [name, change])])).toEqual([
+      ["Spent more on", [["Fun › Made-up 1", "£10.00"], ["Fun › Made-up 3", "£8.00"], ["Fun › Made-up 5", "£6.00"], ["Fun › Made-up 7", "£4.00"]]],
+      ["Spent less on", [["Fun › Made-up 2", "£9.00"], ["Fun › Made-up 4", "£7.00"], ["Fun › Made-up 6", "£5.00"], ["Fun › Made-up 8", "£3.00"]]],
+    ]);
+    await showPage();
+  });
+
   it("leaves out a group with no changes", () => {
     select("Mar 26");
     expect(groups().map(([heading]) => heading)).toEqual(["Spent more on", "Spent less on", "Earned more from"]);

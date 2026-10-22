@@ -9,10 +9,22 @@ export type CategoryKind = "Spending" | "Earnings";
 
 export type Category = { name: string; kind: CategoryKind; subcategories: string[] };
 
-/** How often a Subscription charges. */
-export type SubscriptionInterval = "Weekly" | "Monthly" | "Yearly";
+/** How often a Subscription can charge, shortest first. */
+export const SUBSCRIPTION_INTERVALS = ["Weekly", "Monthly", "Yearly"] as const;
 
-const SUBSCRIPTION_INTERVALS: readonly unknown[] = ["Weekly", "Monthly", "Yearly"] satisfies SubscriptionInterval[];
+/** How often a Subscription charges. */
+export type SubscriptionInterval = (typeof SUBSCRIPTION_INTERVALS)[number];
+
+const isSubscriptionInterval = (interval: unknown): interval is SubscriptionInterval => (SUBSCRIPTION_INTERVALS as readonly unknown[]).includes(interval);
+
+/** Each interval as the rules file spells it, in quotes. */
+const QUOTED_INTERVALS = SUBSCRIPTION_INTERVALS.map((interval) => `"${interval}"`);
+
+/** The intervals a rule can declare, as `"Weekly", "Monthly" or "Yearly"`. */
+const INTERVAL_CHOICES = `${QUOTED_INTERVALS.slice(0, -1).join(", ")} or ${QUOTED_INTERVALS.at(-1)}`;
+
+/** Why Subscriptions can't be a Category (ADR 0005), as both the rules file's and a rule's refusal say. */
+const NOT_A_CATEGORY = "Subscriptions is a view across Categories, not a Category";
 
 /**
  * Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as
@@ -67,7 +79,7 @@ function checkedCategory(category: unknown): Category {
   if (kind !== "Spending" && kind !== "Earnings") throw fail('whose "kind" is not "Spending" or "Earnings"');
   if (isSubscriptions(name)) {
     throw fail(
-      'named Subscriptions, but Subscriptions is a view across Categories, not a Category. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": "Weekly", "Monthly" or "Yearly", then remove the Category',
+      `named Subscriptions, but ${NOT_A_CATEGORY}. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": ${INTERVAL_CHOICES}, then remove the Category`,
     );
   }
   return { name, kind, subcategories };
@@ -82,7 +94,7 @@ const isSubscriptions = (name: string) => sameName(name, "Subscriptions");
  */
 export function subscriptionsRefusal(rule: RuleToSave): string | undefined {
   if ("transfer" in rule || rule.adds?.new !== "Category" || !isSubscriptions(rule.category)) return undefined;
-  return 'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
+  return `${NOT_A_CATEGORY}, so the rule wasn't saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.`;
 }
 
 const HOW_TO_FIX = 'Give it a Category and Subcategory, or "transfer": true';
@@ -104,8 +116,8 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
   }
   if (subscription === undefined) return { contains, category: category.name, subcategory };
   if (category.kind !== "Spending") throw notSpending();
-  if (subscription !== false && !SUBSCRIPTION_INTERVALS.includes(subscription)) throw fail('whose "subscription" is not "Weekly", "Monthly", "Yearly" or false');
-  return { contains, category: category.name, subcategory, subscription: subscription as SubscriptionInterval | false };
+  if (subscription !== false && !isSubscriptionInterval(subscription)) throw fail(`whose "subscription" is not ${QUOTED_INTERVALS.join(", ")} or false`);
+  return { contains, category: category.name, subcategory, subscription };
 }
 
 /**
@@ -125,11 +137,11 @@ export function ruleToSave(rule: unknown): RuleToSave {
   if (transfer === true && subscription !== undefined) throw new Error(NOT_SPENDING);
   if (transfer === true) return { contains, transfer };
   if (transfer !== undefined) throw new Error('The rule\'s "transfer" can only be true, so it wasn\'t saved.');
-  if (subscription !== undefined && !SUBSCRIPTION_INTERVALS.includes(subscription)) {
-    throw new Error('The rule\'s "subscription" can only be "Weekly", "Monthly" or "Yearly", so it wasn\'t saved.');
+  if (subscription !== undefined && !isSubscriptionInterval(subscription)) {
+    throw new Error(`The rule's "subscription" can only be ${INTERVAL_CHOICES}, so it wasn't saved.`);
   }
   const trimmed = (name: unknown) => (typeof name === "string" ? name.trim() : "");
-  const declared = subscription === undefined ? {} : { subscription: subscription as SubscriptionInterval };
+  const declared = subscription === undefined ? {} : { subscription };
   const named = { contains, category: trimmed(category), subcategory: trimmed(subcategory), ...declared };
   const { new: adding, kind } = fieldsOf(adds);
   if (adds !== undefined) {
@@ -253,16 +265,16 @@ export function kindFor(contains: string, uncategorised: UncategorisedDescriptio
 export function markedNew(rule: RuleToSave, { uncategorised, categories }: { uncategorised: UncategorisedDescription[]; categories: Category[] }): RuleToSave {
   if ("transfer" in rule) return rule;
   const { adds } = rule;
-  const kept = { contains: rule.contains, ...(rule.subscription === undefined ? {} : { subscription: rule.subscription }) };
+  const containsAndMark = { contains: rule.contains, ...(rule.subscription === undefined ? {} : { subscription: rule.subscription }) };
   const category = categories.find(({ name }) => sameName(rule.category, name));
   if (!category) {
     // With no row it was started from, a rule catching nothing starts as Spending, the usual case.
     const kind = adds?.new === "Category" ? adds.kind : kindFor(rule.contains, uncategorised, "Out");
-    return { ...kept, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
+    return { ...containsAndMark, category: rule.category, subcategory: rule.subcategory, adds: { new: "Category", kind } };
   }
   const subcategory = category.subcategories.find((name) => sameName(rule.subcategory, name));
-  if (!subcategory) return { ...kept, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
-  return { ...kept, category: category.name, subcategory };
+  if (!subcategory) return { ...containsAndMark, category: category.name, subcategory: rule.subcategory, adds: { new: "Subcategory" } };
+  return { ...containsAndMark, category: category.name, subcategory };
 }
 
 /** What a rule with this "contains" text would catch among the Uncategorised descriptions. */
