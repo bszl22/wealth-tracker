@@ -1,6 +1,6 @@
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import { directionOf, kindFor, kindOf, markedNew, previewRule, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave } from "./rules.js";
+import { directionOf, kindFor, kindOf, markedNew, previewRule, sortsIntoSpending, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave, type SubscriptionInterval } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
@@ -837,11 +837,35 @@ function newNameFields(startingKind: CategoryKind, categories: Category[]) {
 }
 
 /**
+ * A rule form's "This is a Subscription" tickbox, offered only while `show` is told the rule sorts into Spending, and
+ * once ticked its interval, starting at Monthly. `mark` gives the interval to save the rule with, or nothing.
+ */
+function subscriptionFields() {
+  const tickbox = el("input", { name: "subscription", type: "checkbox" });
+  const tickboxLabel = el("label", { class: "tickbox" });
+  tickboxLabel.append(tickbox, "This is a Subscription");
+  const interval = el("select", { name: "interval" });
+  (["Weekly", "Monthly", "Yearly"] satisfies SubscriptionInterval[]).forEach((i) => interval.append(el("option", { value: i }, i)));
+  interval.value = "Monthly";
+  const intervalLabel = labelled("Interval", interval);
+  const declared = () => !tickboxLabel.hidden && tickbox.checked;
+  return {
+    fields: [tickboxLabel, intervalLabel],
+    show: (spending: boolean) => {
+      tickboxLabel.hidden = !spending;
+      intervalLabel.hidden = !declared();
+    },
+    mark: () => (declared() ? (interval.value as SubscriptionInterval) : undefined),
+  };
+}
+
+/**
  * A form making a Categorisation Rule: its "contains" text, starting as `description`, and an existing Subcategory,
  * Transfer, or a new name from `newNameFields`. A new Category's kind starts as `kindFor` gives it, falling back to
  * `direction`, that of the row the form was started from. While the text is edited it shows what the rule would
- * catch. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report again.
- * Given a Suggested Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving
+ * catch. For a Spending Subcategory it offers "This is a Subscription" (`subscriptionFields`), saving the rule with that
+ * mark when ticked. Saving adds the rule, and any new Category or Subcategory, to the rules file, then shows the Report
+ * again. Given a Suggested Rule to `edit`, it starts with the Suggested Rule's choice, and any new name it adds, and saving
  * approves it.
  */
 function ruleForm(
@@ -878,6 +902,15 @@ function ruleForm(
   const adding = () => choices[Number(then.value)]?.adds;
   then.addEventListener("change", () => newName.show(adding()));
   newName.show(adding());
+  const subscription = subscriptionFields();
+  const chosenRule = () => (then.value === "" ? undefined : choices[Number(then.value)]?.rule(text.value));
+  const showSubscription = () => {
+    const rule = chosenRule();
+    subscription.show(rule !== undefined && sortsIntoSpending(rule, categories));
+  };
+  // Captured, so a change to any field the rule depends on is seen here whether or not the change event bubbles.
+  form.addEventListener("change", showSubscription, true);
+  showSubscription();
   const error = el("div", { class: "error", role: "alert", hidden: "" });
   const fail = (message: string) => {
     error.textContent = message;
@@ -893,7 +926,9 @@ function ruleForm(
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
     const missing = newName.missing(adding());
     if (missing) return fail(missing);
-    const rule = chosen.rule(text.value);
+    const declared = subscription.mark();
+    const named = chosen.rule(text.value);
+    const rule = declared && !("transfer" in named) ? { ...named, subscription: declared } : named;
     const refusal = subscriptionsRefusal(rule);
     if (refusal) return fail(refusal);
     save.disabled = true;
@@ -912,6 +947,7 @@ function ruleForm(
     labelled("Description contains", text),
     labelled("Sort into", then),
     ...newName.fields,
+    ...subscription.fields,
     preview,
     el("div", { class: "muted" }, "Added to the end of your rules, so it only catches Transactions that are Uncategorised now."),
     error,

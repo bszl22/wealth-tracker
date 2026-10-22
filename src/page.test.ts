@@ -15,6 +15,9 @@ const rows = (table: Element) => [...(table as HTMLTableElement).rows].map((row)
 /** Every URL the page fetched, in order. */
 const fetched: string[] = [];
 
+/** Every rule the page sent to save, as sent. */
+const sentRules: unknown[] = [];
+
 /** The port `npm run made-up` serves the page on. */
 const PORT = 4400;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -28,8 +31,10 @@ async function showPage(options?: Parameters<typeof madeUpTracker>[0] | Tracker)
   document.body.innerHTML = /<main>[\s\S]*<\/main>/.exec(page)![0];
   const handle = handlerFor(options && "report" in options ? options : madeUpTracker(options), PORT);
   fetched.length = 0;
+  sentRules.length = 0;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     fetched.push(url);
+    if (url === "/rules") sentRules.push(JSON.parse(String(init!.body)));
     // The browser adds the Origin itself. happy-dom's Request drops one passed in, so it is set afterwards, as a browser would.
     const request = new Request(ORIGIN + url, init);
     request.headers.set("origin", ORIGIN);
@@ -450,6 +455,112 @@ describe("making a rule from an Uncategorised row", () => {
   });
 });
 
+describe("declaring a Subscription on the rule form", () => {
+  const makeRule = (description: string) => {
+    const row = [...tabPanel("To sort").querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
+    [...row.querySelectorAll("button")].find((b) => b.textContent === "Make rule")!.click();
+    return tabPanel("To sort").querySelector<HTMLFormElement>("form.rule")!;
+  };
+  const choose = (form: HTMLFormElement, label: string) => {
+    const select = form.querySelector<HTMLSelectElement>('select[name="then"]')!;
+    select.value = [...select.options].find((option) => option.textContent === label)!.value;
+    select.dispatchEvent(new Event("change"));
+  };
+  const pick = (form: HTMLFormElement, name: string, value: string) => {
+    const select = form.querySelector<HTMLSelectElement>(`select[name="${name}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change"));
+  };
+  /** The "This is a Subscription" tickbox, found by its label. */
+  const tickbox = (form: HTMLFormElement) =>
+    [...form.querySelectorAll("label")].find((label) => label.textContent === "This is a Subscription")!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  const offersTickbox = (form: HTMLFormElement) => !tickbox(form).closest("label")!.hidden;
+
+  it("offers the tickbox only when sorting into a Spending Subcategory, existing or new", () => {
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    expect(offersTickbox(form)).toBe(false);
+    choose(form, "Fun › Streaming");
+    expect(offersTickbox(form)).toBe(true);
+    choose(form, "Transfer");
+    expect(offersTickbox(form)).toBe(false);
+    choose(form, "Work › Salary");
+    expect(offersTickbox(form)).toBe(false);
+    choose(form, "New Subcategory…");
+    pick(form, "parent", "Food");
+    expect(offersTickbox(form)).toBe(true);
+    pick(form, "parent", "Savings");
+    expect(offersTickbox(form)).toBe(false);
+    choose(form, "New Category…");
+    pick(form, "kind", "Spending");
+    expect(offersTickbox(form)).toBe(true);
+    pick(form, "kind", "Earnings");
+    expect(offersTickbox(form)).toBe(false);
+  });
+
+  const interval = (form: HTMLFormElement) => form.querySelector<HTMLSelectElement>('select[name="interval"]')!;
+  const offersInterval = (form: HTMLFormElement) => !interval(form).closest("label")!.hidden;
+
+  it("shows the interval choice once ticked, starting at Monthly, and hides it once unticked", () => {
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "Fun › Streaming");
+    expect(offersInterval(form)).toBe(false);
+    tickbox(form).click();
+    expect(offersInterval(form)).toBe(true);
+    expect(interval(form).value).toBe("Monthly");
+    expect([...interval(form).options].map((option) => option.textContent)).toEqual(["Weekly", "Monthly", "Yearly"]);
+    tickbox(form).click();
+    expect(offersInterval(form)).toBe(false);
+  });
+
+  it("hides the interval choice when the rule stops sorting into Spending", () => {
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "Fun › Streaming");
+    tickbox(form).click();
+    choose(form, "Transfer");
+    expect(offersInterval(form)).toBe(false);
+  });
+
+  const save = (form: HTMLFormElement) => form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  const subscriptionRow = (name: string) =>
+    rows(document.querySelector(".subscriptions table")!).find(([subscription]) => subscription === name);
+
+  it("saves the rule with the chosen interval, and its Transactions then show as a declared Subscription", async () => {
+    await showPage();
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "Fun › Streaming");
+    tickbox(form).click();
+    pick(form, "interval", "Yearly");
+    save(form);
+    await vi.waitFor(() => expect(subscriptionRow("Streaming (MYSTERY MERCHANT LTD)")).toBeDefined());
+    expect(sentRules).toEqual([{ contains: "MYSTERY MERCHANT LTD", category: "Fun", subcategory: "Streaming", subscription: "Yearly" }]);
+    // Its two made-up charges, £67.00 on 14 Feb and £129.00 on 20 May, are three months apart, but the declared interval counts.
+    expect(subscriptionRow("Streaming (MYSTERY MERCHANT LTD)")!.slice(1, 4)).toEqual(["Yearly", "£67.00", "20 May 2026"]);
+  });
+
+  it("saves the rule with no subscription mark when the tickbox is left unticked", async () => {
+    await showPage();
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "Fun › Streaming");
+    tickbox(form).click();
+    tickbox(form).click();
+    save(form);
+    await vi.waitFor(() => expect(sentRules).toHaveLength(1));
+    expect(sentRules).toEqual([{ contains: "MYSTERY MERCHANT LTD", category: "Fun", subcategory: "Streaming" }]);
+    await vi.waitFor(() => expect(tabPanel("To sort").textContent).not.toContain("MYSTERY MERCHANT LTD"));
+    expect(subscriptionRow("Streaming (MYSTERY MERCHANT LTD)")).toBeUndefined();
+  });
+
+  it("saves no subscription mark when the tickbox was ticked but the rule no longer sorts into Spending", async () => {
+    await showPage();
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "Fun › Streaming");
+    tickbox(form).click();
+    choose(form, "Transfer");
+    save(form);
+    await vi.waitFor(() => expect(sentRules).toEqual([{ contains: "MYSTERY MERCHANT LTD", transfer: true }]));
+  });
+});
+
 const SUBSCRIPTIONS_REFUSAL =
   'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
 
@@ -660,6 +771,29 @@ describe("asking Claude for Suggested Rules", () => {
     await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]));
     expect(spendingLabels()).toContain("Getting About");
     expect(spendingLabels()).not.toContain("Transport");
+  });
+
+  it("offers the Subscription tickbox and interval on a Suggested Rule opened in the rule form, and approving it saves the mark", async () => {
+    await showPage({ claude: recordingClaude });
+    await askClaude();
+    suggestedButton("FRIEND", "Edit").click();
+    const transfer = suggest().querySelector<HTMLFormElement>("form.rule")!;
+    const tickboxLabel = (form: HTMLFormElement) => [...form.querySelectorAll("label")].find((label) => label.textContent === "This is a Subscription")!;
+    expect(tickboxLabel(transfer).hidden).toBe(true);
+    suggestedButton("CITY PARKING", "Edit").click();
+    const form = suggest().querySelector<HTMLFormElement>("form.rule")!;
+    expect(tickboxLabel(form).hidden).toBe(false);
+    tickboxLabel(form).querySelector("input")!.click();
+    const interval = formField<HTMLSelectElement>(form, "interval");
+    expect(interval.closest("label")!.hidden).toBe(false);
+    expect(interval.value).toBe("Monthly");
+    interval.value = "Weekly";
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]));
+    expect(sentRules).toEqual([
+      { contains: "CITY PARKING", category: "Transport", subcategory: "Parking", subscription: "Weekly", adds: { new: "Category", kind: "Spending" } },
+    ]);
+    expect(rows(document.querySelector(".subscriptions table")!).find(([name]) => name === "Parking (CITY PARKING)")?.[1]).toBe("Weekly");
   });
 
   it("stops marking a Category as new once an earlier Suggested Rule naming it is approved", async () => {
