@@ -92,6 +92,12 @@ describe("the Subscriptions table", () => {
     ]);
   });
 
+  it("explains that Current is judged against how far its Account's Statements reach, not today", () => {
+    expect(document.querySelector(".subscriptions .muted")!.textContent).toContain(
+      "Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed.",
+    );
+  });
+
   it("lists a Subscription's Transactions when its yearly cost is clicked", () => {
     const row = [...table().querySelectorAll("tr")].find((r) => r.cells[0]!.textContent === "Streaming (STREAMFLIX)")!;
     row.querySelector<HTMLButtonElement>("button.cell")!.click();
