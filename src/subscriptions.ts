@@ -1,12 +1,13 @@
-import { categorise, type Category, type CategorisationRule } from "./rules.js";
+import { categorise, type Category, type CategorisationRule, type SubscriptionInterval } from "./rules.js";
 import type { Transaction } from "./spending.js";
 import { daysIn, isoDate, type IsoDate, type Pence } from "./statements.js";
 
-export type SubscriptionInterval = "Weekly" | "Monthly" | "Yearly";
+export type { SubscriptionInterval };
 
 /**
- * Spending that repeats on a regular interval for about the same amount: its name, usual amount, interval, last charge,
- * whether it is current, its yearly cost, and the Transactions behind it.
+ * Spending that repeats on a regular interval for about the same amount, found from its charges or declared on its rule:
+ * its name, usual amount, interval, last charge, whether it is current, its yearly cost, whether it was declared, and
+ * the Transactions behind it.
  */
 export type Subscription = {
   name: string;
@@ -20,6 +21,8 @@ export type Subscription = {
   current: boolean;
   /** The usual amount × 52, 12 or 1. */
   yearlyCost: Pence;
+  /** Its rule declares it a Subscription with its interval, rather than it being found from repeating charges. */
+  declared: boolean;
   transactions: Transaction[];
 };
 
@@ -38,25 +41,27 @@ export type SubscriptionsInput = {
 
 /**
  * The Subscriptions among the Spending: money out that a Spending Category's rule matches, grouped by that rule, or
- * that no rule matches, grouped by description. A group is a Subscription when its charges fall at a regular weekly,
- * monthly or yearly interval, each within 10% of its usual amount, with enough charges to show it repeats.
+ * that no rule matches, grouped by description. A group whose rule declares a Subscription is one from its first charge,
+ * at the interval the rule states. Any other group is a Subscription when its charges fall at a regular weekly, monthly
+ * or yearly interval, each within 10% of its usual amount, with enough charges to show it repeats.
  */
 export function findSubscriptions({ transactions, categories, rules }: SubscriptionsInput): Subscriptions {
   const coveredTo = latestDateByAccount(transactions);
   const spendingCategories = new Set(categories.filter(({ kind }) => kind === "Spending").map(({ name }) => name));
-  const groups = new Map<CategorisationRule | string, { name: string; transactions: Transaction[] }>();
+  const groups = new Map<CategorisationRule | string, { name: string; declared?: SubscriptionInterval; transactions: Transaction[] }>();
   for (const transaction of transactions) {
     if (transaction.direction !== "Out") continue;
     const rule = categorise(rules, transaction);
     if (rule && !("category" in rule && spendingCategories.has(rule.category))) continue;
     const key = rule ?? transaction.description;
     const name = rule && "category" in rule ? `${rule.subcategory} (${rule.contains})` : transaction.description;
-    const group = groups.get(key) ?? { name, transactions: [] };
+    const declared = rule && "category" in rule ? rule.subscription : undefined;
+    const group = groups.get(key) ?? { name, declared, transactions: [] };
     group.transactions.push(transaction);
     groups.set(key, group);
   }
   const subscriptions = [...groups.values()]
-    .map(({ name, transactions }) => subscription(name, transactions, coveredTo.get(transactions[0]!.account)!))
+    .map(({ name, declared, transactions }) => subscription(name, transactions, declared, coveredTo.get(transactions[0]!.account)!))
     .filter((found): found is Subscription => found !== undefined)
     // A stable sort, so equal yearly costs keep the order found.
     .sort((a, b) => Number(b.current) - Number(a.current) || b.yearlyCost - a.yearlyCost);
@@ -82,23 +87,27 @@ function latestDateByAccount(transactions: Transaction[]): Map<string, IsoDate> 
 }
 
 /**
- * The group's Subscription, or none when its charges don't repeat regularly for about the same amount. `coveredTo` is
- * the latest Transaction date for the group's Account.
+ * The group's Subscription: at the `declared` interval when its rule declares one, or else none when its charges don't
+ * repeat regularly for about the same amount. `coveredTo` is the latest Transaction date for the group's Account.
  */
-function subscription(name: string, transactions: Transaction[], coveredTo: IsoDate): Subscription | undefined {
+function subscription(name: string, transactions: Transaction[], declared: SubscriptionInterval | undefined, coveredTo: IsoDate): Subscription | undefined {
   const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
   // The middle charge, or the lower of the two middle ones, so the usual amount is one actually charged.
   const amounts = sorted.map(({ pence }) => pence).sort((a, b) => a - b);
   const usual = amounts[Math.floor((amounts.length - 1) / 2)]!;
-  if (amounts.some((pence) => Math.abs(pence - usual) * 10 > usual)) return undefined;
-  const gaps = sorted.slice(1).map(({ date }, i) => daysBetween(sorted[i]!.date, date));
-  const found = INTERVALS.find(
-    ({ gapDays: [min, max], fewestCharges }) => sorted.length >= fewestCharges && gaps.every((gap) => gap >= min && gap <= max),
-  );
+  const found = declared ? INTERVALS.find(({ interval }) => interval === declared) : detected(sorted, usual);
   if (!found) return undefined;
   const lastCharge = sorted.at(-1)!.date;
   const current = addDays(nextDue(lastCharge, found.interval), GRACE_DAYS) > coveredTo;
-  return { name, usual, interval: found.interval, lastCharge, current, yearlyCost: usual * found.perYear, transactions: sorted };
+  const yearlyCost = usual * found.perYear;
+  return { name, usual, interval: found.interval, lastCharge, current, yearlyCost, declared: declared !== undefined, transactions: sorted };
+}
+
+/** The interval charges in date order repeat at, each within 10% of the usual amount, or none. */
+function detected(sorted: Transaction[], usual: Pence) {
+  if (sorted.some(({ pence }) => Math.abs(pence - usual) * 10 > usual)) return undefined;
+  const gaps = sorted.slice(1).map(({ date }, i) => daysBetween(sorted[i]!.date, date));
+  return INTERVALS.find(({ gapDays: [min, max], fewestCharges }) => sorted.length >= fewestCharges && gaps.every((gap) => gap >= min && gap <= max));
 }
 
 /** When the charge after one on `date` is due: a week, a calendar month or a calendar year later, on the month's last day if it is shorter. */

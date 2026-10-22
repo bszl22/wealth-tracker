@@ -9,8 +9,17 @@ export type CategoryKind = "Spending" | "Earnings";
 
 export type Category = { name: string; kind: CategoryKind; subcategories: string[] };
 
-/** Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as Transfers. */
-export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string } | { transfer: true });
+/** How often a Subscription charges. */
+export type SubscriptionInterval = "Weekly" | "Monthly" | "Yearly";
+
+const SUBSCRIPTION_INTERVALS: readonly unknown[] = ["Weekly", "Monthly", "Yearly"] satisfies SubscriptionInterval[];
+
+/**
+ * Gives Transactions whose description contains `contains`, ignoring case, a Category and Subcategory, or marks them as
+ * Transfers. A rule into a Spending Category can declare that it catches a Subscription charging at `subscription`'s
+ * interval (ADR 0005).
+ */
+export type CategorisationRule = { contains: string } & ({ category: string; subcategory: string; subscription?: SubscriptionInterval } | { transfer: true });
 
 export type Rules = { categories: Category[]; rules: CategorisationRule[] };
 
@@ -79,8 +88,10 @@ const HOW_TO_FIX = 'Give it a Category and Subcategory, or "transfer": true';
 
 function checkedRule(rule: unknown, categories: Category[]): CategorisationRule {
   const fail = (problem: string) => new Error(`${RULES_FILE} has a rule ${problem}: ${JSON.stringify(rule)}`);
-  const { contains, category: categoryName, subcategory, transfer } = (rule ?? {}) as Record<string, unknown>;
+  const { contains, category: categoryName, subcategory, transfer, subscription } = (rule ?? {}) as Record<string, unknown>;
+  const notSpending = () => fail('declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription"');
   if (typeof contains !== "string" || contains.trim() === "") throw fail('with no "contains" text to look for');
+  if (transfer === true && subscription !== undefined) throw notSpending();
   if (transfer === true) return { contains, transfer };
   if (transfer !== undefined) throw fail(`whose "transfer" is not true. ${HOW_TO_FIX}`);
   if (typeof categoryName !== "string") throw fail(`with no "category". ${HOW_TO_FIX}`);
@@ -90,7 +101,10 @@ function checkedRule(rule: unknown, categories: Category[]): CategorisationRule 
   if (!category.subcategories.includes(subcategory)) {
     throw fail(`naming "${subcategory}", which is not a Subcategory of ${category.name}`);
   }
-  return { contains, category: category.name, subcategory };
+  if (subscription === undefined) return { contains, category: category.name, subcategory };
+  if (category.kind !== "Spending") throw notSpending();
+  if (!SUBSCRIPTION_INTERVALS.includes(subscription)) throw fail('whose "subscription" is not "Weekly", "Monthly" or "Yearly"');
+  return { contains, category: category.name, subcategory, subscription: subscription as SubscriptionInterval };
 }
 
 /**

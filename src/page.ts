@@ -831,7 +831,7 @@ function subscriptionsSection({ subscriptions, currentYearlyCost }: Subscription
     section.append(el("div", { class: "muted" }, "No Spending repeats weekly, monthly or yearly for about the same amount yet."));
     return section;
   }
-  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly for about the same amount, found from your Transactions, which keep their own Categories. Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed. Click a yearly cost to see its Transactions."));
+  section.append(el("div", { class: "muted" }, "Spending that repeats weekly, monthly or yearly. Most are found from repeating charges for about the same amount; others are declared on their rules, each marked as catching a Subscription with its interval, so they show from the first charge. Their Transactions keep their own Categories. Current means its next charge, plus 7 days, isn't due until after the latest Transaction on its Account's Statements, so Statements a few weeks behind today don't make it Lapsed. Click a yearly cost to see its Transactions."));
   const panel = el("div", { class: "transactions-panel" });
   const table = el("table");
   table.append(headerRow([["Subscription"], ["Interval"], ["Usual amount", "balance"], ["Last charge"], ["Status"], ["Yearly cost", "balance"]]));

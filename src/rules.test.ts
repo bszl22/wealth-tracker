@@ -35,6 +35,30 @@ describe("readRules", () => {
     expect(readRules(contents)).toEqual({ categories: [], rules: [{ contains: "CARD BILL", transfer: true }] });
   });
 
+  it("reads a Spending rule declaring it catches a Subscription, with its weekly, monthly or yearly interval", () => {
+    const declared = ["Weekly", "Monthly", "Yearly"].map((subscription, i) => ({ contains: `SHOP ${i}`, category: "Food", subcategory: "Groceries", subscription }));
+    const contents = rulesFile({ categories: [food], rules: declared });
+    expect(readRules(contents).rules).toEqual(declared);
+  });
+
+  it("fails on a Subscription declared with an interval other than Weekly, Monthly or Yearly, quoting the rule", () => {
+    const contents = rulesFile({ categories: [food], rules: [{ contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: "Daily" }] });
+    expect(() => readRules(contents)).toThrow(
+      'rules.json has a rule whose "subscription" is not "Weekly", "Monthly" or "Yearly": {"contains":"corner shop","category":"Food","subcategory":"Groceries","subscription":"Daily"}',
+    );
+  });
+
+  it("fails on a Transfer rule or an Earnings rule declaring a Subscription, since only Spending can be one", () => {
+    const transfer = rulesFile({ categories: [], rules: [{ contains: "CARD BILL", transfer: true, subscription: "Monthly" }] });
+    expect(() => readRules(transfer)).toThrow(
+      'rules.json has a rule declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription": {"contains":"CARD BILL","transfer":true,"subscription":"Monthly"}',
+    );
+    const earnings = rulesFile({ categories: [work], rules: [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary", subscription: "Monthly" }] });
+    expect(() => readRules(earnings)).toThrow(
+      'rules.json has a rule declaring a Subscription that is not Spending. Only a rule into a Spending Category can have "subscription": {"contains":"EMPLOYER LTD","category":"Work","subcategory":"Salary","subscription":"Monthly"}',
+    );
+  });
+
   it("fails on a rule with no text to look for, since it would match every Transaction", () => {
     const contents = rulesFile({ categories: [], rules: [{ contains: "", transfer: true }] });
     expect(() => readRules(contents)).toThrow('rules.json has a rule with no "contains" text to look for: {"contains":"","transfer":true}');
@@ -231,6 +255,15 @@ describe("withRule", () => {
         2,
       ) + "\n",
     );
+  });
+
+  it("keeps a declared Subscription's interval on the rule it saves, so it reads back the same", () => {
+    const contents = rulesFile({ categories: [food], rules: [{ contains: "CARD BILL", transfer: true }] });
+    const saved = withRule(contents, { contains: "veg box", category: "food", subcategory: "groceries", subscription: "Weekly" });
+    expect(readRules(saved).rules).toEqual([
+      { contains: "CARD BILL", transfer: true },
+      { contains: "veg box", category: "Food", subcategory: "Groceries", subscription: "Weekly" },
+    ]);
   });
 
   it("fails when the rules file doesn't read cleanly, without quoting it", () => {

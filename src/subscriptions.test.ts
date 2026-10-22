@@ -21,6 +21,8 @@ const work: Category = { name: "Work", kind: "Earnings", subcategories: ["Salary
 const categories = [fun, work];
 const rules: CategorisationRule[] = [
   { contains: "STREAMFLIX", category: "Fun", subcategory: "Streaming" },
+  { contains: "TRAVEL COVER", category: "Fun", subcategory: "Gym", subscription: "Yearly" },
+  { contains: "FITNESS HUB", category: "Fun", subcategory: "Gym", subscription: "Monthly" },
   { contains: "EMPLOYER", category: "Work", subcategory: "Salary" },
   { contains: "SAVINGS POT", transfer: true },
 ];
@@ -34,8 +36,26 @@ describe("findSubscriptions", () => {
   it("finds a monthly Subscription matched by a rule, named by the rule's Subcategory and \"contains\" text", () => {
     const { subscriptions } = find(charges("STREAMFLIX.COM", 1099, ["2026-03-15", "2026-04-15", "2026-05-15", "2026-06-15"]));
     expect(subscriptions.map(figures)).toEqual([
-      { name: "Streaming (STREAMFLIX)", usual: 1099, interval: "Monthly", lastCharge: "2026-06-15", current: true, yearlyCost: 13188, charges: 4 },
+      { name: "Streaming (STREAMFLIX)", usual: 1099, interval: "Monthly", lastCharge: "2026-06-15", current: true, yearlyCost: 13188, declared: false, charges: 4 },
     ]);
+  });
+
+  it("finds a Subscription declared on its rule from one charge, with the stated interval and yearly cost, counted in the total", () => {
+    const { subscriptions, currentYearlyCost } = find(charges("TRAVEL COVER ANNUAL", 8900, ["2026-03-03"]));
+    expect(subscriptions.map(figures)).toEqual([
+      { name: "Gym (TRAVEL COVER)", usual: 8900, interval: "Yearly", lastCharge: "2026-03-03", current: true, yearlyCost: 8900, declared: true, charges: 1 },
+    ]);
+    expect(currentYearlyCost).toBe(8900);
+  });
+
+  it("gives a declared Subscription the interval its rule states, whatever its charges' gaps suggest", () => {
+    const { subscriptions } = find(charges("TRAVEL COVER", 8900, ["2026-04-01", "2026-05-01", "2026-06-01"]));
+    expect(subscriptions.map(({ interval, yearlyCost }) => ({ interval, yearlyCost }))).toEqual([{ interval: "Yearly", yearlyCost: 8900 }]);
+  });
+
+  it("lists a declared Subscription whose charges vary by more than 10%, with the middle charge as its usual amount", () => {
+    const { subscriptions } = find([...charges("FITNESS HUB", 3000, ["2026-04-01"]), ...charges("FITNESS HUB", 4500, ["2026-05-01", "2026-06-01"])]);
+    expect(subscriptions.map(({ usual, yearlyCost, declared }) => ({ usual, yearlyCost, declared }))).toEqual([{ usual: 4500, yearlyCost: 54000, declared: true }]);
   });
 
   it("finds weekly and yearly Subscriptions, with no rule named by their description", () => {

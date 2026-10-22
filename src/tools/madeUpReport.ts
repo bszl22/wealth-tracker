@@ -11,7 +11,8 @@ import { createTracker, type Tracker } from "../tracker.js";
 // rendered by page.test.ts. Every Account, description and figure is invented. Today is fixed at 12 July 2026, so January to June are full months and
 // July is the current month. It covers Refunds, Transfers, Uncategorised money in and out, Uncategorised
 // descriptions whose digits mask to the same text, a one-off large purchase in May, an investment fall in April, a
-// Stale Account, and current and lapsed weekly, monthly and yearly Subscriptions.
+// Stale Account, current and lapsed weekly, monthly and yearly Subscriptions, and a yearly Subscription declared on its
+// rule with a single charge.
 
 const TODAY: IsoDate = "2026-07-12";
 const FULL_MONTHS = [1, 2, 3, 4, 5, 6];
@@ -34,6 +35,7 @@ const rules: CategorisationRule[] = [
   { contains: "PHOTO CLOUD", category: "Fun", subcategory: "Streaming" },
   { contains: "VEG BOX", category: "Food", subcategory: "Groceries" },
   { contains: "SKY AIRLINES", category: "Fun", subcategory: "Holidays" },
+  { contains: "TRAVEL COVER", category: "Fun", subcategory: "Holidays", subscription: "Yearly" },
   { contains: "EMPLOYER", category: "Work", subcategory: "Salary" },
   { contains: "INTEREST", category: "Savings", subcategory: "Interest" },
   { contains: "THANK YOU", transfer: true },
@@ -69,6 +71,8 @@ for (let d = 5; d <= 54; d += 7) add(CARD, d <= 31 ? day(1, d) : day(2, d - 31),
 for (const month of [1, 2, 3]) add(CURRENT, day(month, 20), "MUSICBOX SUBSCRIPTION", 999, "Out");
 add(CARD, "2025-07-08", "PHOTO CLOUD ANNUAL", 5999, "Out");
 add(CARD, day(7, 8), "PHOTO CLOUD ANNUAL", 5999, "Out");
+// A yearly travel cover, declared on its rule, so it is a Subscription from its one charge.
+add(CURRENT, day(3, 3), "TRAVEL COVER ANNUAL", 8900, "Out");
 // The card bill for each month is paid from the current account early the next month.
 for (const month of FULL_MONTHS) {
   const owed = transactions
