@@ -41,10 +41,22 @@ describe("readRules", () => {
     expect(readRules(contents).rules).toEqual(declared);
   });
 
-  it("fails on a Subscription declared with an interval other than Weekly, Monthly or Yearly, quoting the rule", () => {
+  it("reads a Spending rule marked as catching no Subscription", () => {
+    const marked = { contains: "LANDLORD", category: "Food", subcategory: "Groceries", subscription: false };
+    expect(readRules(rulesFile({ categories: [food], rules: [marked] })).rules).toEqual([marked]);
+  });
+
+  it("fails on a Transfer rule or an Earnings rule marked as catching no Subscription, since only Spending can be one", () => {
+    const transfer = rulesFile({ categories: [], rules: [{ contains: "CARD BILL", transfer: true, subscription: false }] });
+    expect(() => readRules(transfer)).toThrow('Only a rule into a Spending Category can have "subscription"');
+    const earnings = rulesFile({ categories: [work], rules: [{ contains: "EMPLOYER LTD", category: "Work", subcategory: "Salary", subscription: false }] });
+    expect(() => readRules(earnings)).toThrow('Only a rule into a Spending Category can have "subscription"');
+  });
+
+  it("fails on a Subscription declared with an interval other than Weekly, Monthly or Yearly, or false, quoting the rule", () => {
     const contents = rulesFile({ categories: [food], rules: [{ contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: "Daily" }] });
     expect(() => readRules(contents)).toThrow(
-      'rules.json has a rule whose "subscription" is not "Weekly", "Monthly" or "Yearly": {"contains":"corner shop","category":"Food","subcategory":"Groceries","subscription":"Daily"}',
+      'rules.json has a rule whose "subscription" is not "Weekly", "Monthly", "Yearly" or false: {"contains":"corner shop","category":"Food","subcategory":"Groceries","subscription":"Daily"}',
     );
   });
 
@@ -264,6 +276,12 @@ describe("withRule", () => {
       { contains: "CARD BILL", transfer: true },
       { contains: "veg box", category: "Food", subcategory: "Groceries", subscription: "Weekly" },
     ]);
+  });
+
+  it("keeps a rule's not-a-Subscription mark when it saves, on that rule and on the rules already in the file", () => {
+    const rent = { contains: "LANDLORD", category: "Food", subcategory: "Groceries", subscription: false };
+    const saved = withRule(rulesFile({ categories: [food], rules: [rent] }), { contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: false });
+    expect(readRules(saved).rules).toEqual([rent, { contains: "corner shop", category: "Food", subcategory: "Groceries", subscription: false }]);
   });
 
   it("fails when the rules file doesn't read cleanly, without quoting it", () => {
