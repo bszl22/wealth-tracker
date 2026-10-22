@@ -77,6 +77,88 @@ describe("the page", () => {
   });
 });
 
+/** The page's tab named `name`. */
+const tab = (name: "Report" | "To sort") => [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === name)!;
+/** The panel the tab named `name` shows. */
+const tabPanel = (name: "Report" | "To sort") => document.getElementById(tab(name).getAttribute("aria-controls")!)!;
+/** The tab now selected, and which panels are showing. */
+const showing = () => ({
+  selected: [...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map((t) => t.textContent),
+  report: !tabPanel("Report").hidden,
+  toSort: !tabPanel("To sort").hidden,
+});
+/** The Report tab's line saying what there is to sort. */
+const toSortLine = () => tabPanel("Report").querySelector(".to-sort")!;
+
+describe("the Report and To sort tabs", () => {
+  beforeAll(() => showPage());
+  // The tests after these start from the made-up Report as it was.
+  afterAll(() => showPage());
+
+  it("opens on the Report tab, with no Uncategorised rows, rule form or Suggest rules on it", () => {
+    expect(showing()).toEqual({ selected: ["Report"], report: true, toSort: false });
+    const report = tabPanel("Report");
+    expect(report.querySelector(".uncategorised-list, .make-rule, form.rule, .suggest-rules")).toBeNull();
+    expect(report.querySelector(".latest")).not.toBeNull();
+  });
+
+  it("keeps Uncategorised in the Report tab's charts and tables", () => {
+    const report = tabPanel("Report");
+    const [spending, earnings] = report.querySelectorAll("table.months");
+    expect(rows(spending!).map(([label]) => label)).toContain("Uncategorised");
+    expect(rows(earnings!).map(([label]) => label)).toContain("Uncategorised");
+    expect([...report.querySelectorAll(".legend.swatches span")].map((span) => span.textContent)).toContain("Uncategorised");
+  });
+
+  it("says how many Uncategorised descriptions there are to sort, and following it opens To sort", () => {
+    expect(toSortLine().textContent).toBe("4 Uncategorised descriptions to sort.");
+    toSortLine().querySelector("button")!.click();
+    expect(showing()).toEqual({ selected: ["To sort"], report: false, toSort: true });
+    tab("Report").click();
+    expect(showing()).toEqual({ selected: ["Report"], report: true, toSort: false });
+  });
+
+  it("holds the Uncategorised rows, rule form, Suggest rules and Suggested Rules in To sort", async () => {
+    tab("To sort").click();
+    const toSort = tabPanel("To sort");
+    expect([...toSort.querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent)).toEqual([
+      "MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988",
+    ]);
+    toSort.querySelector<HTMLButtonElement>(".make-rule")!.click();
+    expect(toSort.querySelector("form.rule")).not.toBeNull();
+    [...toSort.querySelectorAll<HTMLButtonElement>(".suggest-rules button")].find((b) => b.textContent === "Suggest rules")!.click();
+    await vi.waitFor(() => expect(toSort.querySelector(".suggest-rules .suggested table")).not.toBeNull());
+  });
+
+  it("updates both tabs when a rule is saved in To sort, leaving To sort selected", async () => {
+    await showPage();
+    tab("To sort").click();
+    const toSort = tabPanel("To sort");
+    const row = [...toSort.querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === "MYSTERY MERCHANT LTD")!;
+    row.querySelector<HTMLButtonElement>(".make-rule")!.click();
+    const form = toSort.querySelector<HTMLFormElement>("form.rule")!;
+    const select = form.querySelector<HTMLSelectElement>('select[name="then"]')!;
+    select.value = [...select.options].find((option) => option.textContent === "Fun › Holidays")!.value;
+    form.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() => expect(toSortLine().textContent).toBe("3 Uncategorised descriptions to sort."));
+    expect(showing()).toEqual({ selected: ["To sort"], report: false, toSort: true });
+    expect([...tabPanel("To sort").querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent)).toEqual([
+      "PAYMENT FROM A FRIEND", "CITY PARKING 20417", "CITY PARKING 20988",
+    ]);
+    const [spending] = tabPanel("Report").querySelectorAll("table.months");
+    expect(rows(spending!).find(([label]) => label === "Holidays")![5]).toBe("£1,609.00");
+  });
+
+  it("says there is nothing to sort when nothing is Uncategorised", async () => {
+    const tracker = madeUpTracker();
+    for (const contains of ["MYSTERY MERCHANT", "CITY PARKING"]) await tracker.saveRule({ contains, category: "Fun", subcategory: "Holidays" });
+    await tracker.saveRule({ contains: "FRIEND", transfer: true });
+    await showPage(tracker);
+    expect(toSortLine().textContent).toBe("Nothing to sort: every Transaction is sorted into a Category or marked as a Transfer.");
+    expect(toSortLine().querySelector("button")).toBeNull();
+  });
+});
+
 describe("the Subscriptions table", () => {
   const table = () => document.querySelector(".subscriptions table")!;
 
@@ -185,11 +267,11 @@ describe("What changed", () => {
 
 describe("making a rule from an Uncategorised row", () => {
   const uncategorisedDescriptions = () =>
-    [...document.querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent);
+    [...tabPanel("To sort").querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent);
   const makeRule = (description: string) => {
-    const row = [...document.querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
+    const row = [...tabPanel("To sort").querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
     [...row.querySelectorAll("button")].find((b) => b.textContent === "Make rule")!.click();
-    return document.querySelector<HTMLFormElement>("form.rule")!;
+    return tabPanel("To sort").querySelector<HTMLFormElement>("form.rule")!;
   };
   const contains = (form: HTMLFormElement) => form.querySelector<HTMLInputElement>('input[name="contains"]')!;
   const choice = (form: HTMLFormElement) => form.querySelector<HTMLSelectElement>('select[name="then"]')!;
@@ -279,7 +361,7 @@ describe("making a rule from an Uncategorised row", () => {
     field<HTMLSelectElement>(form, "parent").value = "Work";
     type(field(form, "subcategory"), "Gifts");
     save(form);
-    await vi.waitFor(() => expect(document.querySelector(".uncategorised-list .make-rule")).toBeNull());
+    await vi.waitFor(() => expect(tabPanel("To sort").querySelector(".uncategorised-list .make-rule")).toBeNull());
   });
 
   it("refuses a new Category named the same as an existing one, saying why", async () => {
@@ -311,7 +393,7 @@ describe("making a rule from an Uncategorised row", () => {
 const SUBSCRIPTIONS_REFUSAL =
   'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
 
-const suggest = () => document.querySelector(".suggest-rules")!;
+const suggest = () => tabPanel("To sort").querySelector(".suggest-rules")!;
 const suggestButton = () => [...suggest().querySelectorAll("button")].find((b) => b.textContent === "Suggest rules")!;
 
 describe("the about-to-send list for Suggested Rules", () => {
@@ -351,7 +433,7 @@ describe("asking Claude for Suggested Rules", () => {
     suggestButton().click();
     await vi.waitFor(() => expect(suggest().querySelector(".suggested table")).not.toBeNull());
   };
-  const uncategorisedDescriptions = () => [...document.querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent);
+  const uncategorisedDescriptions = () => [...tabPanel("To sort").querySelectorAll(".uncategorised-list td.description")].map((cell) => cell.textContent);
 
   beforeAll(async () => {
     asked.length = 0;
@@ -550,9 +632,9 @@ describe("making a rule with no rules file yet", () => {
   beforeAll(() => showPage({ rulesFile: false }));
 
   const makeRule = (description: string) => {
-    const row = [...document.querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
+    const row = [...tabPanel("To sort").querySelectorAll(".uncategorised-list tr")].find((r) => r.querySelector("td.description")?.textContent === description)!;
     [...row.querySelectorAll("button")].find((b) => b.textContent === "Make rule")!.click();
-    return document.querySelector<HTMLFormElement>("form.rule")!;
+    return tabPanel("To sort").querySelector<HTMLFormElement>("form.rule")!;
   };
   const field = <E extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) => form.querySelector<E>(`[name="${name}"]`)!;
   const type = (input: HTMLInputElement, text: string) => {
