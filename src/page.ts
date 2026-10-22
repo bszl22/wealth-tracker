@@ -1,6 +1,6 @@
 import type { AccountBalance } from "./netWorth.js";
 import type { Report, ReportMonth, ReportResponse } from "./report.js";
-import { directionOf, kindFor, kindOf, markedNew, previewRule, type Category, type CategoryKind, type RuleToSave } from "./rules.js";
+import { directionOf, kindFor, kindOf, markedNew, previewRule, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
 import type { Direction, IsoDate, Pence } from "./statements.js";
@@ -591,6 +591,12 @@ function suggestedList({ uncategorised, categories }: Report, changed: () => voi
     const discard = () => (suggested = suggested.filter((r) => r !== rule));
     const approve = el("button", { type: "button" }, "Approve");
     approve.addEventListener("click", async () => {
+      const refusal = subscriptionsRefusal(rule);
+      if (refusal) {
+        error.textContent = refusal;
+        error.hidden = false;
+        return;
+      }
       approve.disabled = true;
       const response = await saveRule(rule);
       if ("error" in response) {
@@ -773,8 +779,11 @@ function ruleForm(
     if (text.value.trim() === "") return fail('Give the rule some "contains" text to look for.');
     const missing = newName.missing(adding());
     if (missing) return fail(missing);
+    const rule = chosen.rule(text.value);
+    const refusal = subscriptionsRefusal(rule);
+    if (refusal) return fail(refusal);
     save.disabled = true;
-    const response = await saveRule(chosen.rule(text.value));
+    const response = await saveRule(rule);
     if ("error" in response) {
       save.disabled = false;
       return fail(response.error);

@@ -214,7 +214,21 @@ describe("making a rule from an Uncategorised row", () => {
       ),
     );
   });
+
+  it("refuses a new Category named Subscriptions, in any case or with surrounding spaces, before saving", async () => {
+    await showPage();
+    const form = makeRule("MYSTERY MERCHANT LTD");
+    choose(form, "New Category…");
+    type(field(form, "category"), "  subscriptions ");
+    type(field(form, "subcategory"), "Streaming");
+    save(form);
+    await vi.waitFor(() => expect(form.querySelector(".error")!.textContent).toBe(SUBSCRIPTIONS_REFUSAL));
+    expect(fetched).not.toContain("/rules");
+  });
 });
+
+const SUBSCRIPTIONS_REFUSAL =
+  'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
 
 const suggest = () => document.querySelector(".suggest-rules")!;
 const suggestButton = () => [...suggest().querySelectorAll("button")].find((b) => b.textContent === "Suggest rules")!;
@@ -348,6 +362,16 @@ describe("asking Claude for Suggested Rules", () => {
     suggestedButton("CITY PARKING", "Approve").click();
     await vi.waitFor(() => expect(uncategorisedDescriptions()).toEqual(["MYSTERY MERCHANT LTD", "PAYMENT FROM A FRIEND"]));
     expect(spendingLabels()).toEqual(expect.arrayContaining(["Transport", "Parking"]));
+  });
+
+  it("refuses approving a Suggested Rule whose new Category is named Subscriptions, saving nothing", async () => {
+    await showPage({ claude: async () => JSON.stringify({ suggestions: [{ contains: "MYSTERY", transfer: false, category: "Subscriptions", subcategory: "Gadgets" }] }) });
+    await askClaude();
+    suggestedButton("MYSTERY", "Approve").click();
+    await vi.waitFor(() => expect(suggest().querySelector(".suggested .error")!.textContent).toBe(SUBSCRIPTIONS_REFUSAL));
+    expect(fetched).not.toContain("/rules");
+    expect(uncategorisedDescriptions()).toContain("MYSTERY MERCHANT LTD");
+    expect(spendingLabels()).not.toContain("Subscriptions");
   });
 
   it("opens a Suggested Rule's new Category in the rule form, to rename or change it before approving it", async () => {

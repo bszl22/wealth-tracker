@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categorise, directionOf, kindFor, kindOf, markedNew, previewRule, readRules, ruleToSave, withRule } from "./rules.js";
+import { categorise, directionOf, kindFor, kindOf, markedNew, previewRule, readRules, ruleToSave, subscriptionsRefusal, withRule } from "./rules.js";
 import type { Category, RuleToSave } from "./rules.js";
 import type { UncategorisedDescription } from "./spending.js";
 import type { Direction } from "./statements.js";
@@ -119,6 +119,39 @@ describe("readRules", () => {
     expect(() => readRules(contents)).toThrow(
       'rules.json has a Category whose "kind" is not "Spending" or "Earnings": {"name":"Work","kind":"Income","subcategories":["Salary"]}',
     );
+  });
+});
+
+describe("a Category named Subscriptions", () => {
+  // Subscriptions are a view across Categories, never a Category (ADR 0005).
+  const named = ["Subscriptions", "subscriptions", "  SUBSCRIPTIONS "];
+  const refusal =
+    'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
+
+  it("fails to load a rules file holding one, in any case or with surrounding spaces, saying how to fix it", () => {
+    for (const name of named) {
+      const contents = rulesFile({ categories: [food, { name, kind: "Spending", subcategories: ["Streaming"] }], rules: [] });
+      expect(() => readRules(contents)).toThrow(
+        'rules.json has a Category named Subscriptions, but Subscriptions is a view across Categories, not a Category. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": "Weekly", "Monthly" or "Yearly", then remove the Category',
+      );
+    }
+  });
+
+  it("refuses saving a rule that adds one, in any case or with surrounding spaces, saying to mark the rule as a Subscription", () => {
+    const contents = rulesFile({ categories: [food], rules: [] });
+    for (const name of named) {
+      const rule: RuleToSave = { contains: "STREAMING CO", category: name, subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } };
+      expect(() => withRule(contents, rule)).toThrow(refusal);
+    }
+  });
+
+  it("names the refusal for a rule that adds one, so the page can refuse it before saving, and nothing for any other rule", () => {
+    expect(subscriptionsRefusal({ contains: "STREAMING CO", category: " subscriptions", subcategory: "Streaming", adds: { new: "Category", kind: "Spending" } })).toBe(refusal);
+    expect(
+      subscriptionsRefusal({ contains: "STREAMING CO", category: "Entertainment", subcategory: "Subscriptions", adds: { new: "Category", kind: "Spending" } }),
+    ).toBeUndefined();
+    expect(subscriptionsRefusal({ contains: "STREAMING CO", category: "Food", subcategory: "Groceries" })).toBeUndefined();
+    expect(subscriptionsRefusal({ contains: "CARD BILL", transfer: true })).toBeUndefined();
   });
 });
 

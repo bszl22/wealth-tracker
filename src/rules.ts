@@ -55,7 +55,24 @@ function checkedCategory(category: unknown): Category {
   }
   if (subcategories.some((s, i) => subcategories.findIndex((t) => sameName(s, t)) !== i)) throw fail("listing a Subcategory twice");
   if (kind !== "Spending" && kind !== "Earnings") throw fail('whose "kind" is not "Spending" or "Earnings"');
+  if (isSubscriptions(name)) {
+    throw fail(
+      'named Subscriptions, but Subscriptions is a view across Categories, not a Category. Move its rules into Categories for what they are for, mark each as a Subscription with "subscription": "Weekly", "Monthly" or "Yearly", then remove the Category',
+    );
+  }
   return { name, kind, subcategories };
+}
+
+/** Whether a Category name is Subscriptions, which is a view across Categories and never a Category (ADR 0005). */
+const isSubscriptions = (name: string) => sameName(name, "Subscriptions");
+
+/**
+ * Why a rule to save is refused because it adds a Category named Subscriptions, by `sameName`, or nothing when it
+ * doesn't. The page checks it before saving, and saving checks it again.
+ */
+export function subscriptionsRefusal(rule: RuleToSave): string | undefined {
+  if ("transfer" in rule || rule.adds?.new !== "Category" || !isSubscriptions(rule.category)) return undefined;
+  return 'Subscriptions is a view across Categories, not a Category, so the rule wasn\'t saved. Sort it into a Category for what it is for, and tick "This is a Subscription" instead.';
 }
 
 const HOW_TO_FIX = 'Give it a Category and Subcategory, or "transfer": true';
@@ -112,7 +129,7 @@ const fieldsOf = (sent: unknown) => (typeof sent === "object" && sent !== null ?
  * file spells them, and any new Category added after the others or new Subcategory added to the end of its Category's,
  * as 2-space JSON, leaving everything else unchanged and in order. Fails, quoting nothing from the file, when the file
  * doesn't read cleanly or wouldn't with the rule added, and refuses a new Category or Subcategory named the same as an
- * existing one.
+ * existing one or a new Category named Subscriptions (`subscriptionsRefusal`).
  */
 export function withRule(contents: string | undefined, rule: RuleToSave): string {
   try {
@@ -121,6 +138,8 @@ export function withRule(contents: string | undefined, rule: RuleToSave): string
     // The reader's message quotes the file, so only says that it failed.
     throw new Error(`${RULES_FILE} doesn't read cleanly, so the rule wasn't saved. Fix ${RULES_FILE}, then reload the page to see the problem.`);
   }
+  const refusal = subscriptionsRefusal(rule);
+  if (refusal) throw new Error(refusal);
   const file = contents === undefined ? { categories: [], rules: [] } : (JSON.parse(contents) as { categories: Category[]; rules: unknown[] });
   const { adds, ...named } = rule;
   const added = "transfer" in named ? named : { ...named, ...spelledAsIn(file.categories, named, adds) };
