@@ -18,7 +18,7 @@ An Account whose Balance is money you owe, such as a credit card.
 _Avoid_: Debt (when meaning the account)
 
 **Balance**:
-The value of one Account on a given date, in GBP.
+The money one Account holds, or for a Liability owes, on a given date, in GBP.
 _Avoid_: Value, amount
 
 ### Sources

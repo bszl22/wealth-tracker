@@ -32,7 +32,7 @@ Create a GitHub issue.
 
 ## When a design is agreed in conversation
 
-When a grilling session settles a design that will be built straight away, without `/to-spec`, publish the agreed design as an issue before building it, and end each commit that builds it with `Closes #<n>`. `/code-review` then finds its spec from the commits, and the reasons behind the change outlast the session.
+When a grilling session settles a design that will be built straight away, without `/to-spec`, publish the agreed design as an issue before building it, and end each commit that builds it with `Closes #<n>`. `/code-review` then finds its spec from the commits, and the reasons behind the change outlast the session. Before opening the PR, run the `code-review` skill against the base branch, since building outside `/implement` skips its review step.
 
 ## When a skill says "fetch the relevant ticket"
 
