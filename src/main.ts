@@ -11,7 +11,7 @@ import { createTracker } from "./tracker.js";
 const PORT = 4321;
 
 try {
-  const { dataFolder, trackingStart } = await loadSettings(fileURLToPath(new URL("..", import.meta.url)));
+  const { dataFolder, trackingStart, goal } = await loadSettings(fileURLToPath(new URL("..", import.meta.url)));
   const apiKey = process.env.ANTHROPIC_API_KEY;
   await startServer(
     createTracker({
@@ -19,6 +19,7 @@ try {
       rulesFile: rulesFileIn(dataFolder),
       claude: apiKey ? claudeWith(apiKey) : undefined,
       trackingStart,
+      goal,
       today: localToday,
     }),
     PORT,

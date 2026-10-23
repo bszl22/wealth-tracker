@@ -1,4 +1,6 @@
+import type { Goal } from "../goal.js";
 import type { Balance } from "../netWorth.js";
+import type { YearMonth } from "../report.js";
 import type { Category, CategorisationRule } from "../rules.js";
 import { rulesFileHolding } from "../rulesFile.js";
 import type { StatementRead } from "../scanStatements.js";
@@ -156,6 +158,9 @@ const MADE_UP_SUGGESTIONS = [
   { contains: "PARKING ####", transfer: false, category: "Fun", subcategory: "Holidays" },
 ];
 
+/** A made-up Goal the made-up Pace falls short of, so the page shows the shortfall. */
+const MADE_UP_GOAL: Goal = { netWorth: 6000000, by: { year: 2027, month: 12 } };
+
 export const madeUpClaude: AskClaude = async ({ descriptions }) =>
   JSON.stringify({
     suggestions: MADE_UP_SUGGESTIONS.filter(({ contains }) => descriptions.some(({ description }) => description.toLowerCase().includes(contains.toLowerCase()))),
@@ -166,14 +171,22 @@ export const madeUpClaude: AskClaude = async ({ descriptions }) =>
  * never touched. The rules file starts with the made-up Categories and rules unless told there is none yet, and saving
  * a rule then creates it. It says an API key is set unless told otherwise, though none is ever read or used: Suggested
  * Rules come from `madeUpClaude`, or the `claude` given, and never from the API. Told no key is set, it has no Claude to
- * ask, so asking for Suggested Rules fails as it does in the tracker.
+ * ask, so asking for Suggested Rules fails as it does in the tracker. Its Goal is the made-up one unless given another,
+ * or null for none, and Tracking Start is January unless given a later month.
  */
-export function madeUpTracker({ apiKeySet = true, rulesFile = true, claude = madeUpClaude }: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude } = {}): Tracker {
+export function madeUpTracker({
+  apiKeySet = true,
+  rulesFile = true,
+  claude = madeUpClaude,
+  goal = MADE_UP_GOAL,
+  trackingStart = { year: 2026, month: 1 },
+}: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude; goal?: Goal | null; trackingStart?: YearMonth } = {}): Tracker {
   return createTracker({
     readStatements: async () => madeUpReads(),
     rulesFile: rulesFileHolding(rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined, "Made-up Statements/rules.json"),
     claude: apiKeySet ? claude : undefined,
-    trackingStart: { year: 2026, month: 1 },
+    trackingStart,
+    goal: goal ?? undefined,
     today: () => TODAY,
   });
 }

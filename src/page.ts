@@ -1,5 +1,6 @@
+import type { GoalProgress, ShortfallLine } from "./goal.js";
 import type { AccountBalance } from "./netWorth.js";
-import type { Report, ReportMonth, ReportResponse } from "./report.js";
+import type { Report, ReportMonth, ReportResponse, YearMonth } from "./report.js";
 import { directionOf, kindFor, kindOf, markedNew, previewRule, sortsIntoSpending, SUBSCRIPTION_INTERVALS, subscriptionsRefusal, type Category, type CategoryKind, type RuleToSave, type SubscriptionInterval } from "./rules.js";
 import type { SaveResponse, SuggestResponse } from "./server.js";
 import type { Breakdown, Figure, Transaction, UncategorisedDescription } from "./spending.js";
@@ -1015,6 +1016,76 @@ function spendingSection(report: Report, openToSort: () => void) {
   return section;
 }
 
+const longMonthLabel = (iso: IsoDate) => new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+const goalMonthLabel = ({ year, month }: YearMonth) => longMonthLabel(`${year}-${String(month).padStart(2, "0")}-01`);
+const share = (fraction: number) => `${Math.round(fraction * 100)}%`;
+
+/** A table of label and figure rows. */
+function figureTable(className: string, rows: [label: string, pence: Pence][]) {
+  const table = el("table", { class: className });
+  for (const [label, pence] of rows) {
+    const row = el("tr");
+    row.append(el("td", {}, label), el("td", { class: "balance" }, gbp(pence)));
+    table.append(row);
+  }
+  return table;
+}
+
+function shortfallTable(heading: string, lines: ShortfallLine[]) {
+  const table = el("table");
+  table.append(headerRow([[heading], ["Each month", "balance"], ["Share of shortfall", "balance"]]));
+  for (const { name, monthly, share: fraction } of lines) {
+    const row = el("tr");
+    row.append(el("td", {}, name), el("td", { class: "balance" }, gbp(monthly)), el("td", { class: "balance" }, share(fraction)));
+    table.append(row);
+  }
+  return table;
+}
+
+const paceMonths = (count: number) => (count === 1 ? "the last complete month" : `the last ${count} complete months`);
+
+/**
+ * Where the Goal stands: the change it needs each month against the Pace and where the Pace leads, and, when short, the
+ * largest Spending Categories and current Subscriptions beside the shortfall, collapsed. Facts only, never a suggested cut.
+ */
+function goalPanel(progress: GoalProgress) {
+  const { goal, stale } = progress;
+  const by = goalMonthLabel(goal.by);
+  const panel = el("div", { class: "goal" });
+  panel.append(el("h2", {}, `Goal: ${gbp(goal.netWorth)} by ${by}`));
+  const status = (text: string) => el("div", { class: "status" }, text);
+  if (progress.state === "Waiting") {
+    panel.append(status("Shown once the first month since Tracking Start is complete."));
+  } else if (progress.state === "Passed") {
+    const { final } = progress;
+    panel.append(status(`${final.netWorth >= goal.netWorth ? "Reached" : "Not reached"}: ${gbp(final.netWorth)} at ${longMonthLabel(final.monthEnd)} month end`));
+  } else if (progress.state === "Reached") {
+    panel.append(status(`Reached: ${gbp(progress.from.netWorth)} at ${longMonthLabel(progress.from.monthEnd)} month end`));
+  } else {
+    const { from, monthsLeft, needed, pace, projected, shortfall } = progress;
+    const figures: [string, Pence][] = [
+      [`Net Worth at ${longMonthLabel(from.monthEnd)} month end`, from.netWorth],
+      [`Needed each month, over ${monthsLeft} month${monthsLeft === 1 ? "" : "s"}`, needed],
+    ];
+    if (pace && projected !== undefined) figures.push([`Pace over ${paceMonths(pace.months.length)}`, pace.pence], [`At this Pace by ${by}`, projected]);
+    panel.append(figureTable("figures", figures));
+    if (!pace) panel.append(status("The Pace shows once a complete month after Tracking Start has a change in Net Worth."));
+    else if (shortfall) {
+      panel.append(status(`Short by ${gbp(shortfall.pence)} a month`));
+      const list = el("div", { class: "shortfall" });
+      list.append(shortfallTable("Spending Category", shortfall.spending), shortfallTable("Current Subscription", shortfall.subscriptions));
+      panel.append(opener("Largest Spending Categories and current Subscriptions, each month", [list]), list);
+    } else {
+      panel.append(status(`On track: ${gbp(pace.pence - needed)} a month to spare`));
+    }
+  }
+  if (stale.length > 0) {
+    const names = stale.join(", ");
+    panel.append(el("div", { class: "stale-warning" }, `${names} ${stale.length === 1 ? "is" : "are"} Stale, so an old Balance still counts and may make this look better or worse than it is.`));
+  }
+  return panel;
+}
+
 type TabName = "Report" | "To sort";
 const TAB_NAMES: TabName[] = ["Report", "To sort"];
 
@@ -1085,6 +1156,7 @@ async function render() {
   }
   // The latest full month starts selected.
   monthSelection.select(monthSelection.selected ?? (months.findLast((month) => !month.partial) ?? months.at(-1))?.monthEnd);
+  if (report.goal) reportTab.append(goalPanel(report.goal));
   reportTab.append(
     legend(SERIES.map(({ key, label }) => [key, label])),
     chart(months),
