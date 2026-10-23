@@ -1074,7 +1074,7 @@ function goalPanel(progress: GoalProgress) {
       panel.append(status(`Short by ${gbp(shortfall.pence)} a month`));
       const list = el("div", { class: "shortfall" });
       list.append(shortfallTable("Spending Category", shortfall.spending), shortfallTable("Current Subscription", shortfall.subscriptions));
-      panel.append(opener(`Where ${gbp(shortfall.pence)} a month could come from`, [list]), list);
+      panel.append(opener("Largest Spending Categories and current Subscriptions, each month", [list]), list);
     } else {
       panel.append(status(`On track: ${gbp(pace.pence - needed)} a month to spare`));
     }

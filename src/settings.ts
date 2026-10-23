@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { Goal } from "./goal.js";
-import type { YearMonth } from "./report.js";
+import { monthsBetween, type YearMonth } from "./report.js";
 
 export type Settings = { dataFolder: string; trackingStart: YearMonth; goal: Goal | undefined };
 
@@ -34,14 +34,14 @@ export async function loadSettings(projectRoot: string): Promise<Settings> {
   return { dataFolder: folder, trackingStart: start, goal: goal === undefined ? undefined : readGoal(goal, start) };
 }
 
-/** The optional Goal: a target Net Worth in pounds and the month to reach it by, no earlier than Tracking Start. */
+/** The optional Goal: the Net Worth to reach, in pounds, and the month to reach it by, no earlier than Tracking Start. */
 function readGoal(goal: unknown, trackingStart: YearMonth): Goal {
   const { netWorth, by } = (goal ?? {}) as Record<string, unknown>;
   const month = typeof by === "string" ? yearMonth(by) : undefined;
   if (typeof netWorth !== "number" || !Number.isFinite(netWorth) || !month) {
     throw new Error(`${SETTINGS_FILE}'s "goal" needs a "netWorth" in pounds and a "by" month, like { "netWorth": 30000, "by": "2027-12" }. Remove "goal" to show none.`);
   }
-  if (month.year * 12 + month.month < trackingStart.year * 12 + trackingStart.month) {
+  if (monthsBetween(trackingStart, month) < 0) {
     throw new Error(`${SETTINGS_FILE}'s "goal" is due before Tracking Start. Give a "by" month from Tracking Start on.`);
   }
   return { netWorth: Math.round(netWorth * 100), by: month };

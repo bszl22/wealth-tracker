@@ -1,9 +1,9 @@
 import type { AccountBalance, MonthEndSnapshot } from "./netWorth.js";
-import type { ReportMonth, YearMonth } from "./report.js";
+import { monthsBetween, yearMonthOf, type ReportMonth, type YearMonth } from "./report.js";
 import type { IsoDate, Pence } from "./statements.js";
 import type { Subscriptions } from "./subscriptions.js";
 
-/** A target Net Worth to reach by the end of a chosen month. */
+/** A Net Worth to reach by the end of a chosen month. */
 export type Goal = { netWorth: Pence; by: YearMonth };
 
 /** The average change in Net Worth per month over the month ends listed, Other Change included. */
@@ -50,7 +50,8 @@ export function goalProgress(goal: Goal, months: ReportMonth[], accounts: Accoun
   if (!from) return { goal, stale, state: "Waiting" };
   const monthsLeft = monthsBetween(yearMonthOf(from.monthEnd), goal.by);
   if (monthsLeft <= 0) {
-    const final = complete.find((m) => sameMonth(yearMonthOf(m.monthEnd), goal.by))!.snapshot;
+    // Settings refuse a Goal due before Tracking Start, so its month is among the complete ones.
+    const final = complete.find((m) => monthsBetween(yearMonthOf(m.monthEnd), goal.by) === 0)!.snapshot;
     return { goal, stale, state: "Passed", final };
   }
   if (from.netWorth >= goal.netWorth) return { goal, stale, state: "Reached", from };
@@ -80,10 +81,4 @@ function shortfallFrom(pence: Pence, months: ReportMonth[], { subscriptions }: S
   return { pence, spending, subscriptions: current.sort((a, b) => b.monthly - a.monthly) };
 }
 
-const yearMonthOf = (monthEnd: IsoDate): YearMonth => {
-  const [year, month] = monthEnd.split("-").map(Number) as [number, number];
-  return { year, month };
-};
-const monthsBetween = (from: YearMonth, to: YearMonth) => (to.year - from.year) * 12 + to.month - from.month;
-const sameMonth = (a: YearMonth, b: YearMonth) => monthsBetween(a, b) === 0;
 const sum = (pence: Pence[]) => pence.reduce((total, p) => total + p, 0);

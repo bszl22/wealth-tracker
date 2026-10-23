@@ -16,7 +16,7 @@ describe("the Goal in settings", () => {
     expect((await load({})).goal).toBeUndefined();
   });
 
-  it("reads the target Net Worth in pounds and the month to reach it by", async () => {
+  it("reads the Net Worth to reach, in pounds, and the month to reach it by", async () => {
     expect((await load({ goal: { netWorth: 30000.5, by: "2027-12" } })).goal).toEqual({ netWorth: 3000050, by: { year: 2027, month: 12 } });
   });
 

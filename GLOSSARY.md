@@ -106,7 +106,7 @@ The part of a month's change in Net Worth that Earnings minus Spending doesn't e
 _Avoid_: Unexplained, residual
 
 **Goal**:
-A target Net Worth to reach by a chosen month-end, such as £30,000 by December 2027. There is one Goal at a time.
+A Net Worth to reach by a chosen month-end, such as £30,000 by December 2027. There is one Goal at a time.
 _Avoid_: Target, savings goal
 
 **Pace**:

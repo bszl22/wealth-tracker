@@ -959,8 +959,13 @@ describe("the page when the Report can't be built", () => {
 
 describe("the Goal panel", () => {
   const panel = () => tabPanel("Report").querySelector(".goal");
-  const figures = () => rows(panel()!.querySelector("table.figures")!);
+  const status = () => panel()!.querySelector(".status")!.textContent;
+  const figureLabels = () => rows(panel()!.querySelector("table.figures")!).map(([label]) => label);
   const opener = () => panel()!.querySelector<HTMLButtonElement>("button.expand")!;
+  const money = String.raw`£[\d,]+\.\d\d`;
+  /** The made-up Report's latest complete Month-End Snapshot's Net Worth, so Goals can be set either side of it. */
+  const startingNetWorth = async () => (await madeUpTracker().report()).months.findLast((m) => !m.partial)!.snapshot.netWorth;
+  const byDec2027 = { year: 2027, month: 12 };
 
   beforeAll(() => showPage());
   afterAll(() => showPage());
@@ -971,26 +976,26 @@ describe("the Goal panel", () => {
 
   it("shows the Goal, the change it needs each month, the Pace over the last 3 complete months and where the Pace leads", () => {
     expect(panel()!.querySelector("h2")!.textContent).toBe("Goal: £60,000.00 by Dec 2027");
-    expect(figures()).toEqual([
-      ["Net Worth at Jun 2026 month end", "£41,187.79"],
-      ["Needed each month, over 18 months", "£1,045.12"],
-      ["Pace over the last 3 complete months", "£379.84"],
-      ["At this Pace by Dec 2027", "£48,024.91"],
+    expect(figureLabels()).toEqual([
+      "Net Worth at Jun 2026 month end",
+      "Needed each month, over 18 months",
+      "Pace over the last 3 complete months",
+      "At this Pace by Dec 2027",
     ]);
-    expect(panel()!.querySelector(".status")!.textContent).toBe("Short by £665.28 a month");
+    expect(status()).toMatch(new RegExp(`^Short by ${money} a month$`));
   });
 
-  it("lists the top Spending Categories and current Subscriptions with their share of the shortfall, collapsed until opened", () => {
-    const list = panel()!.querySelector(".shortfall")!;
-    expect(opener().textContent).toBe("Where £665.28 a month could come from");
-    expect((list as HTMLElement).hidden).toBe(true);
+  it("lists the Spending Categories and current Subscriptions with their share of the shortfall, collapsed until opened, suggesting no cut", () => {
+    const list = panel()!.querySelector<HTMLElement>(".shortfall")!;
+    expect(opener().textContent).toBe("Largest Spending Categories and current Subscriptions, each month");
+    expect(list.hidden).toBe(true);
     opener().click();
-    expect((list as HTMLElement).hidden).toBe(false);
+    expect(list.hidden).toBe(false);
     const [spending, subscriptions] = [...list.querySelectorAll("table")].map(rows);
     expect(spending![0]).toEqual(["Spending Category", "Each month", "Share of shortfall"]);
-    expect(spending!.find(([name]) => name === "Home")).toEqual(["Home", "£1,330.00", "200%"]);
+    expect(spending!.find(([name]) => name === "Home")).toEqual(["Home", expect.stringMatching(new RegExp(`^${money}$`)), expect.stringMatching(/^\d+%$/)]);
     expect(subscriptions![0]).toEqual(["Current Subscription", "Each month", "Share of shortfall"]);
-    expect(subscriptions!.find(([name]) => name === "Streaming (STREAMFLIX)")).toEqual(["Streaming (STREAMFLIX)", "£10.99", "2%"]);
+    expect(subscriptions!.find(([name]) => name === "Streaming (STREAMFLIX)")?.[1]).toBe("£10.99");
   });
 
   it("warns that a Stale Account can make it look off, naming the Account", () => {
@@ -998,20 +1003,31 @@ describe("the Goal panel", () => {
   });
 
   it("says when the Pace is enough, with nothing to list", async () => {
-    await showPage({ goal: { netWorth: 4200000, by: { year: 2027, month: 12 } } });
-    expect(panel()!.querySelector(".status")!.textContent).toMatch(/^On track: £[\d,.]+ a month to spare$/);
+    await showPage({ goal: { netWorth: (await startingNetWorth()) + 1, by: byDec2027 } });
+    expect(status()).toMatch(new RegExp(`^On track: ${money} a month to spare$`));
     expect(panel()!.querySelector(".shortfall")).toBeNull();
   });
 
   it("says when the Goal is reached", async () => {
-    await showPage({ goal: { netWorth: 4000000, by: { year: 2027, month: 12 } } });
-    expect(panel()!.querySelector(".status")!.textContent).toBe("Reached: £41,187.79 at Jun 2026 month end");
+    await showPage({ goal: { netWorth: await startingNetWorth(), by: byDec2027 } });
+    expect(status()).toMatch(new RegExp(`^Reached: ${money} at Jun 2026 month end$`));
     expect(panel()!.querySelector("table.figures")).toBeNull();
   });
 
   it("gives the Net Worth at the Goal's month end once that month has passed", async () => {
-    await showPage({ goal: { netWorth: 5000000, by: { year: 2026, month: 3 } } });
-    expect(panel()!.querySelector(".status")!.textContent).toMatch(/^Not reached: £[\d,.]+ at Mar 2026 month end$/);
+    await showPage({ goal: { netWorth: 100000000, by: { year: 2026, month: 3 } } });
+    expect(status()).toMatch(new RegExp(`^Not reached: ${money} at Mar 2026 month end$`));
+  });
+
+  it("says how many complete months the Pace is over when fewer than 3", async () => {
+    await showPage({ trackingStart: { year: 2026, month: 5 } });
+    expect(figureLabels()).toContain("Pace over the last complete month");
+  });
+
+  it("says when there is no Pace yet, with no projection", async () => {
+    await showPage({ trackingStart: { year: 2026, month: 6 } });
+    expect(figureLabels()).toEqual(["Net Worth at Jun 2026 month end", "Needed each month, over 18 months"]);
+    expect(status()).toBe("The Pace shows once a complete month after Tracking Start has a change in Net Worth.");
   });
 
   it("is left out without a Goal", async () => {

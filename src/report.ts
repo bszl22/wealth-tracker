@@ -8,6 +8,17 @@ import { findSubscriptions, type Subscriptions } from "./subscriptions.js";
 
 export type YearMonth = { year: number; month: number };
 
+/** The year and month a date falls in. */
+export function yearMonthOf(date: IsoDate): YearMonth {
+  const [year, month] = date.split("-").map(Number) as [number, number];
+  return { year, month };
+}
+
+/** How many months `to` is after `from`: negative when it is before. */
+export function monthsBetween(from: YearMonth, to: YearMonth): number {
+  return (to.year - from.year) * 12 + to.month - from.month;
+}
+
 export type ReportInput = {
   statements: ReconciledStatements;
   categories: Category[];

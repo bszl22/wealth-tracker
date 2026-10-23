@@ -1,5 +1,6 @@
 import type { Goal } from "../goal.js";
 import type { Balance } from "../netWorth.js";
+import type { YearMonth } from "../report.js";
 import type { Category, CategorisationRule } from "../rules.js";
 import { rulesFileHolding } from "../rulesFile.js";
 import type { StatementRead } from "../scanStatements.js";
@@ -171,14 +172,20 @@ export const madeUpClaude: AskClaude = async ({ descriptions }) =>
  * a rule then creates it. It says an API key is set unless told otherwise, though none is ever read or used: Suggested
  * Rules come from `madeUpClaude`, or the `claude` given, and never from the API. Told no key is set, it has no Claude to
  * ask, so asking for Suggested Rules fails as it does in the tracker. Its Goal is the made-up one unless given another,
- * or null for none.
+ * or null for none, and Tracking Start is January unless given a later month.
  */
-export function madeUpTracker({ apiKeySet = true, rulesFile = true, claude = madeUpClaude, goal = MADE_UP_GOAL }: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude; goal?: Goal | null } = {}): Tracker {
+export function madeUpTracker({
+  apiKeySet = true,
+  rulesFile = true,
+  claude = madeUpClaude,
+  goal = MADE_UP_GOAL,
+  trackingStart = { year: 2026, month: 1 },
+}: { apiKeySet?: boolean; rulesFile?: boolean; claude?: AskClaude; goal?: Goal | null; trackingStart?: YearMonth } = {}): Tracker {
   return createTracker({
     readStatements: async () => madeUpReads(),
     rulesFile: rulesFileHolding(rulesFile ? JSON.stringify({ categories, rules }, null, 2) + "\n" : undefined, "Made-up Statements/rules.json"),
     claude: apiKeySet ? claude : undefined,
-    trackingStart: { year: 2026, month: 1 },
+    trackingStart,
     goal: goal ?? undefined,
     today: () => TODAY,
   });
