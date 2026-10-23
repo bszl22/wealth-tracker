@@ -27,7 +27,7 @@ const food = { name: "Food", kind: "Spending", subcategories: ["Groceries"] };
 const rulesContents = JSON.stringify({ categories: [food], rules: [] });
 
 const trackerWith = (rulesFile: RulesFile = rulesFileHolding(rulesContents), claude?: AskClaude) =>
-  createTracker({ readStatements: async () => reads, rulesFile, claude, trackingStart: { year: 2026, month: 2 }, today: () => "2026-03-05" });
+  createTracker({ readStatements: async () => reads, rulesFile, claude, trackingStart: { year: 2026, month: 2 }, goal: undefined, today: () => "2026-03-05" });
 
 describe("createTracker", () => {
   it("gives the Report from the Statements and rules file, reflecting a rule once it is saved", async () => {

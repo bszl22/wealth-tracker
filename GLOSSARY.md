@@ -105,6 +105,14 @@ _Avoid_: Start date, epoch
 The part of a month's change in Net Worth that Earnings minus Spending doesn't explain, such as investment growth or timing between purchases and Statement dates.
 _Avoid_: Unexplained, residual
 
+**Goal**:
+A target Net Worth to reach by a chosen month-end, such as £30,000 by December 2027. There is one Goal at a time.
+_Avoid_: Target, savings goal
+
+**Pace**:
+The average change in Net Worth per month over the last 3 complete months, including Other Change. It is compared with the monthly change a Goal needs.
+_Avoid_: Savings rate, run rate
+
 **Report**:
 Everything the tracker shows at once: each month from Tracking Start through today with its Month-End Snapshot, Spending, Earnings and change in Net Worth, plus each Account's latest Balance, the Uncategorised Transactions, the Subscriptions, the Categories to make Categorisation Rules with, and whether an API key is set to ask for Suggested Rules.
 _Avoid_: Dashboard, summary

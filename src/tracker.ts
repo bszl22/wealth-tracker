@@ -1,3 +1,4 @@
+import type { Goal } from "./goal.js";
 import { buildReport, type Report, type YearMonth } from "./report.js";
 import { readRules, withRule, type RuleToSave } from "./rules.js";
 import type { RulesFile } from "./rulesFile.js";
@@ -26,6 +27,7 @@ export type TrackerAdapters = {
    */
   claude: AskClaude | undefined;
   trackingStart: YearMonth;
+  goal: Goal | undefined;
   today: () => IsoDate;
 };
 
@@ -34,13 +36,13 @@ export type TrackerAdapters = {
  * rules file (ADR 0001). Saves made together each add their rule to the contents the one before wrote, and a failed
  * save doesn't stop the next.
  */
-export function createTracker({ readStatements, rulesFile, claude, trackingStart, today }: TrackerAdapters): Tracker {
+export function createTracker({ readStatements, rulesFile, claude, trackingStart, goal, today }: TrackerAdapters): Tracker {
   const report = async () => {
     const statements = reconcileStatements(await readStatements());
     const contents = await rulesFile.read();
     const { categories, rules } = readRules(contents);
     const found = contents !== undefined;
-    return buildReport({ statements, categories, rules, rulesFile: { path: rulesFile.path, found }, trackingStart, today: today(), apiKeySet: claude !== undefined });
+    return buildReport({ statements, categories, rules, rulesFile: { path: rulesFile.path, found }, trackingStart, today: today(), apiKeySet: claude !== undefined, goal });
   };
   let saving: Promise<unknown> = Promise.resolve();
   return {

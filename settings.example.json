@@ -1,4 +1,5 @@
 {
   "dataFolder": "/path/to/your/statements/folder",
-  "trackingStart": "2026-01"
+  "trackingStart": "2026-01",
+  "goal": { "netWorth": 30000, "by": "2027-12" }
 }

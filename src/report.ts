@@ -1,3 +1,4 @@
+import { goalProgress, type Goal, type GoalProgress } from "./goal.js";
 import { calculateNetWorth, type AccountBalance, type MonthEndSnapshot } from "./netWorth.js";
 import type { Category, CategorisationRule } from "./rules.js";
 import type { ReconciledStatements } from "./scanStatements.js";
@@ -17,6 +18,8 @@ export type ReportInput = {
   today: IsoDate;
   /** Whether an API key is set, meaning the tracker was given Claude to ask for Suggested Rules. Never the key itself. */
   apiKeySet: boolean;
+  /** The Goal set in settings, if any. */
+  goal?: Goal | undefined;
 };
 
 /**
@@ -33,8 +36,8 @@ export type NetWorthChange = { since: IsoDate; change: Pence; net: Pence; otherC
 
 /**
  * Everything the page shows: each month from Tracking Start through today, each Account's latest Balance, the
- * Uncategorised Transactions, the Subscriptions, the rules file's Categories to make rules with, and whether Suggested
- * Rules can be asked for.
+ * Uncategorised Transactions, the Subscriptions, the rules file's Categories to make rules with, whether Suggested
+ * Rules can be asked for, and where the Goal stands, when one is set.
  */
 export type Report = {
   months: ReportMonth[];
@@ -44,12 +47,13 @@ export type Report = {
   categories: Category[];
   rulesFile: ReportInput["rulesFile"];
   apiKeySet: boolean;
+  goal: GoalProgress | undefined;
 };
 
 /** What the page receives: the Report, or why it can't be shown. */
 export type ReportResponse = Report | { error: string };
 
-export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today, apiKeySet }: ReportInput): Report {
+export function buildReport({ statements: { balances, transactions }, categories, rules, rulesFile, trackingStart, today, apiKeySet, goal }: ReportInput): Report {
   const monthEnds = monthEndsFrom(trackingStart, today);
   const { snapshots, accounts } = calculateNetWorth({ balances, monthEnds, today });
   const spending = calculateSpending({ transactions, categories, rules, monthEnds, today });
@@ -60,7 +64,8 @@ export function buildReport({ statements: { balances, transactions }, categories
     return { ...month, snapshot, netWorthChange: before && netWorthChange(before, snapshot, month.net) };
   });
   const subscriptions = findSubscriptions({ transactions, categories, rules, today });
-  return { months, accounts, uncategorised: spending.uncategorised, subscriptions, categories, rulesFile, apiKeySet };
+  const progress = goal && goalProgress(goal, months, accounts, subscriptions);
+  return { months, accounts, uncategorised: spending.uncategorised, subscriptions, categories, rulesFile, apiKeySet, goal: progress };
 }
 
 function netWorthChange(before: MonthEndSnapshot, after: MonthEndSnapshot, net: Pence): NetWorthChange {

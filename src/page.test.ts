@@ -956,3 +956,66 @@ describe("the page when the Report can't be built", () => {
     expect(document.querySelector(".latest")).toBeNull();
   });
 });
+
+describe("the Goal panel", () => {
+  const panel = () => tabPanel("Report").querySelector(".goal");
+  const figures = () => rows(panel()!.querySelector("table.figures")!);
+  const opener = () => panel()!.querySelector<HTMLButtonElement>("button.expand")!;
+
+  beforeAll(() => showPage());
+  afterAll(() => showPage());
+
+  it("sits at the top of the Report tab", () => {
+    expect(tabPanel("Report").querySelector(".goal + .legend")).not.toBeNull();
+  });
+
+  it("shows the Goal, the change it needs each month, the Pace over the last 3 complete months and where the Pace leads", () => {
+    expect(panel()!.querySelector("h2")!.textContent).toBe("Goal: £60,000.00 by Dec 2027");
+    expect(figures()).toEqual([
+      ["Net Worth at Jun 2026 month end", "£41,187.79"],
+      ["Needed each month, over 18 months", "£1,045.12"],
+      ["Pace over the last 3 complete months", "£379.84"],
+      ["At this Pace by Dec 2027", "£48,024.91"],
+    ]);
+    expect(panel()!.querySelector(".status")!.textContent).toBe("Short by £665.28 a month");
+  });
+
+  it("lists the top Spending Categories and current Subscriptions with their share of the shortfall, collapsed until opened", () => {
+    const list = panel()!.querySelector(".shortfall")!;
+    expect(opener().textContent).toBe("Where £665.28 a month could come from");
+    expect((list as HTMLElement).hidden).toBe(true);
+    opener().click();
+    expect((list as HTMLElement).hidden).toBe(false);
+    const [spending, subscriptions] = [...list.querySelectorAll("table")].map(rows);
+    expect(spending![0]).toEqual(["Spending Category", "Each month", "Share of shortfall"]);
+    expect(spending!.find(([name]) => name === "Home")).toEqual(["Home", "£1,330.00", "200%"]);
+    expect(subscriptions![0]).toEqual(["Current Subscription", "Each month", "Share of shortfall"]);
+    expect(subscriptions!.find(([name]) => name === "Streaming (STREAMFLIX)")).toEqual(["Streaming (STREAMFLIX)", "£10.99", "2%"]);
+  });
+
+  it("warns that a Stale Account can make it look off, naming the Account", () => {
+    expect(panel()!.querySelector(".stale-warning")!.textContent).toContain("Old Easy Access");
+  });
+
+  it("says when the Pace is enough, with nothing to list", async () => {
+    await showPage({ goal: { netWorth: 4200000, by: { year: 2027, month: 12 } } });
+    expect(panel()!.querySelector(".status")!.textContent).toMatch(/^On track: £[\d,.]+ a month to spare$/);
+    expect(panel()!.querySelector(".shortfall")).toBeNull();
+  });
+
+  it("says when the Goal is reached", async () => {
+    await showPage({ goal: { netWorth: 4000000, by: { year: 2027, month: 12 } } });
+    expect(panel()!.querySelector(".status")!.textContent).toBe("Reached: £41,187.79 at Jun 2026 month end");
+    expect(panel()!.querySelector("table.figures")).toBeNull();
+  });
+
+  it("gives the Net Worth at the Goal's month end once that month has passed", async () => {
+    await showPage({ goal: { netWorth: 5000000, by: { year: 2026, month: 3 } } });
+    expect(panel()!.querySelector(".status")!.textContent).toMatch(/^Not reached: £[\d,.]+ at Mar 2026 month end$/);
+  });
+
+  it("is left out without a Goal", async () => {
+    await showPage({ goal: null });
+    expect(panel()).toBeNull();
+  });
+});
